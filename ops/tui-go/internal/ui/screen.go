@@ -44,6 +44,13 @@ func plain(s string, keepANSI bool) string {
 func RenderScreen(ctx *core.Ctx, o Options, w, h, tab int, page string, keepANSI bool) string {
 	m := screenModel(ctx, o, w, h)
 	m.tab = max(0, min(len(tabNames)-1, tab))
+	if strings.HasPrefix(page, "find:") { // v5.1: the Trades table filtered by a mint search ("find:%abc%"; add ",skips" for the skip rows)
+		q := strings.TrimPrefix(page, "find:")
+		if strings.HasSuffix(q, ",skips") {
+			q, m.skipsMode = strings.TrimSuffix(q, ",skips"), 2
+		}
+		m.tab, m.query = 3, q
+	}
 	switch page {
 	case "help":
 		m.showHelp = true
@@ -53,6 +60,8 @@ func RenderScreen(ctx *core.Ctx, o Options, w, h, tab int, page string, keepANSI
 	case "splash":
 		m.loading = true
 		m.loadTotal = max(1, ctx.Src.DoneBytes()*100/43)
+	case "skips", "skipsall": // v5.1: the Trades table with the skipped tokens switch on (filter skips / every skip)
+		m.tab, m.skipsMode = 3, map[string]int{"skips": 1, "skipsall": 2}[page]
 	case "today":
 		m.todayOn = true
 		m.today = screenToday(ctx, m.view.NowNS())

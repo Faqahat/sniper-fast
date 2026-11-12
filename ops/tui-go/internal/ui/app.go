@@ -131,6 +131,7 @@ type Model struct {
 	fltShadow                          bool // Filters: show the LIVE rows scored on the shadow window (v; default hidden)
 	fltDism                            bool // Filters: the DISMISSED filters' rows expanded (d; default one summary line)
 	tradeInfo                          bool // Trades: the flagged-by panel under the table (x)
+	skipsMode                          int  // v5.1 Trades: skipped tokens in the table (t): 0 off (default), 1 filter skips, 2 every skip
 	fltRows                            []core.FiltItem
 	fltRowY                            int
 	flash                              string
@@ -786,6 +787,11 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.tab == 7 && m.detail == nil {
 			m.fltDism = !m.fltDism
 		}
+	case "t": // v5.1 Trades: the skipped tokens in the table: off -> filter skips -> every skip (busy, not a setup) -> off
+		if m.tab == 3 && m.detail == nil {
+			m.skipsMode = (m.skipsMode + 1) % 3
+			m.tradeSel, m.tradeTop = 0, 0
+		}
 	case "x": // Trades: which filters would have blocked the selected trade (the panel under the table)
 		if m.tab == 3 && m.detail == nil {
 			m.tradeInfo = !m.tradeInfo
@@ -806,7 +812,7 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.logWrap = !m.logWrap
 		}
 	case "enter":
-		if m.tab == 3 && m.detail == nil && len(m.tradeRows) > 0 {
+		if m.tab == 3 && m.detail == nil && len(m.tradeRows) > 0 && m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)].Kind != "SKIP" {
 			m.detail = m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)]
 			m.scroll["detail"] = 0
 		} else if m.tab == 7 && m.detail == nil && len(m.fltRows) > 0 { // Filters: a LOG item's trade
@@ -1064,7 +1070,7 @@ func (m *Model) bodyKey(w, bh int) string {
 	if m.tab == 7 {
 		flt = fmt.Sprintf("|%d|%d|%d|%d|%v|%v", m.fltSel, m.fltTop, m.fltFilter, m.fltSort, m.fltAsc, m.fltAll) + fmt.Sprintf("|%v|%v", m.fltShadow, m.fltDism)
 	}
-	flt += fmt.Sprintf("|x%v", m.tradeInfo)
+	flt += fmt.Sprintf("|x%v|sk%d", m.tradeInfo, m.skipsMode)
 	return flt + fmt.Sprintf("%d|%v|%v|%d|%d|%d|%d|%s|%d|%d|%d|%d|%d|%d|%s|%v|%v|%d|%v|%v|%d|%v|%d|%v|%v|%g|%s|%d|%d|%d|%d|%d",
 		m.sortCol, m.sortAsc, m.opt.NoLinks, w, bh, M.Version, M.TradeVer, v.Status, tick, arm, m.tab, det, m.tradeSel, m.tradeTop, m.query, m.logAll, m.logWrap, m.logOff,
 		m.usdFirst, m.todayOn, m.todayCard.Net+int64(m.todayCard.Loading)*7919+serKey(m.pnl()), m.dark, m.scope, m.ascii, m.anim, v.Price,

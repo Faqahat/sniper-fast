@@ -13,6 +13,7 @@ type keyMap struct {
 	Anim, Mute, Help, Quit          key.Binding
 	Sort, Order, Copy, Mouse        key.Binding
 	NoFill, Shadow, Why, Dism       key.Binding
+	Skips                           key.Binding
 	tab                             int
 	detail                          bool
 }
@@ -53,6 +54,7 @@ func newKeyMap() keyMap {
 		NoFill:  nb(k("n"), h("n", "no-dip rows")),
 		Shadow:  nb(k("v"), h("v", "shadow rows")),
 		Why:     nb(k("x"), h("x", "blocked by")),
+		Skips:   nb(k("t"), h("t", "skips off/filters/all")),
 		Dism:    nb(k("d"), h("d", "dismissed filters")),
 	}
 }
@@ -64,7 +66,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 	}
 	switch k.tab {
 	case 3: // trades
-		return []key.Binding{k.Up, k.Enter, k.Sort, k.Order, k.Filter, k.Search, k.Copy, k.Why, k.Unit, k.Help, k.Quit}
+		return []key.Binding{k.Up, k.Enter, k.Sort, k.Order, k.Filter, k.Search, k.Skips, k.Copy, k.Why, k.Unit, k.Help, k.Quit}
 	case 7: // filters
 		return []key.Binding{k.Up, withHelp(k.Filter, "f", "filter"), k.Dism, k.NoFill, k.Shadow, k.Sort, k.Order, k.Copy, k.Help, k.Quit}
 	case 5: // log
@@ -77,7 +79,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Tabs, k.Next, k.Prev, k.Up, k.Down, k.PgUp, k.PgDn, k.Home, k.End},
-		{k.Enter, k.Back, withHelp(k.Filter, "f", "filter trades / log / filters"), k.Search, k.Sort, k.Order, k.Copy, k.Wrap, k.NoFill, k.Shadow, k.Dism, withHelp(k.Why, "x", "filters that blocked a trade")},
+		{k.Enter, k.Back, withHelp(k.Filter, "f", "filter trades / log / filters"), k.Search, k.Sort, k.Order, k.Copy, k.Wrap, k.NoFill, k.Shadow, k.Dism, withHelp(k.Why, "x", "filters that blocked a trade"), withHelp(k.Skips, "t", "Trades: skipped tokens off / filter skips / all")},
 		{k.Scope, k.Session, k.Unit, k.Pause, k.Price, k.Faster, k.Anim, k.Mute, k.Mouse, k.Help, k.Quit},
 	}
 }

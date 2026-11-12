@@ -126,6 +126,9 @@ func (m *Model) blkStyle(n core.Num) lipgloss.Style {
 
 // tradeCells: one trade's cells (plain text) and their styles.
 func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.Style) {
+	if tr.Skip != nil {
+		return m.skipCells(tr.Skip, cols)
+	}
 	t := m.th
 	v := m.view
 	p, hp := tr.Pnl, tr.HasPnl
@@ -500,17 +503,65 @@ func (m *Model) tradesBlockRaw(w, h int) string {
 // filteredTrades: the Trades tab's list (filter + mint search).
 func (m *Model) filteredTrades() []*core.Trade {
 	tl := core.SortedTrades(m.view.Trades, filters[m.tfilter])
-	if q := strings.TrimSpace(m.query); q != "" {
+	if sk := m.skipRows(); len(sk) > 0 { // v5.1: the skipped tokens (t), merged newest first with the trades
+		all := make([]*core.Trade, 0, len(tl)+len(sk))
+		i, j := 0, 0
+		for i < len(tl) || j < len(sk) {
+			if j >= len(sk) || (i < len(tl) && tl[i].T >= sk[j].T) {
+				all = append(all, tl[i])
+				i++
+			} else {
+				all = append(all, sk[j])
+				j++
+			}
+		}
+		tl = all
+	}
+	if q := mintQuery(m.query); q != "" { // the mint search: %part% anywhere in the mint (the % signs optional), trades and skips
 		var out []*core.Trade
-		lq := strings.ToLower(q)
 		for _, tr := range tl {
-			if strings.HasPrefix(strings.ToLower(tr.Mint), lq) || strings.Contains(strings.ToLower(tr.Mint), lq) {
+			if strings.Contains(strings.ToLower(tr.Mint), q) {
 				out = append(out, tr)
 			}
 		}
 		tl = out
 	}
 	return m.sortTrades(tl)
+}
+
+// mintQuery: the search text as a lower-case substring ("%abc%", "abc%" and "abc" all mean "contains abc").
+func mintQuery(q string) string {
+	return strings.ToLower(strings.Trim(strings.TrimSpace(q), "%*"))
+}
+
+// skipRows: the skip rows the switch shows (nil when off), newest first; the trade filter's kind (T2 / RA) applies to them too.
+func (m *Model) skipRows() []*core.Trade {
+	if m.skipsMode == 0 || m.view == nil {
+		return nil
+	}
+	flt := filters[m.tfilter]
+	var out []*core.Trade
+	for _, tr := range m.view.SkipTrades {
+		r := tr.Skip
+		if m.skipsMode == 1 && r.Cat != "filter" {
+			continue
+		}
+		switch flt {
+		case "pre-send", "all":
+		case "T2", "t2":
+			if r.Kind != "T2" {
+				continue
+			}
+		case "re-arm", "RA", "rearm":
+			if r.Kind != "RA" {
+				continue
+			}
+		default: // a trade-only filter (wins, losses, regular, ...): no skips
+			continue
+		}
+		out = append(out, tr)
+	}
+	return out
 }
 
 // scrTrades: every trade, newest first, a scrollable table with the selection; f filters, / searches a mint.
@@ -535,7 +586,26 @@ func (m *Model) scrTrades(w, bh int) string {
 		}
 	}
 	flt := filters[m.tfilter]
-	left := t.AccB.Render("TRADES ") + t.Acc.Render(flt) + t.Lbl.Render(fmt.Sprintf("  (%d)", n))
+	nsk := 0
+	var skr []core.SkipRow
+	for _, x := range tl {
+		if x.Skip != nil {
+			nsk++
+			skr = append(skr, *x.Skip)
+		}
+	}
+	left := t.AccB.Render("TRADES ") + t.Acc.Render(flt) + t.Lbl.Render(fmt.Sprintf("  (%d)", n-nsk))
+	if m.skipsMode > 0 { // v5.1: the switch's state, how many skips and what their paper would have made
+		st := core.SumSkips(skr)
+		lbl := map[int]string{1: "filter skips", 2: "all skips"}[m.skipsMode]
+		left += t.Warn.Render("  + "+lbl) + t.Lbl.Render(fmt.Sprintf(" %d", nsk))
+		if st.Scored > 0 {
+			left += t.Lbl.Render(fmt.Sprintf("  paper %dW/%dL ", st.WinN, st.LoseN)) + t.Money(int64(st.Paper*core.LAM), true, false).Render(core.FS(st.Paper, 3))
+			if st.CalN > 0 {
+				left += t.Lbl.Render(" cal ") + t.Money(int64(st.Cal*core.LAM), true, false).Render(core.FS(st.Cal, 3))
+			}
+		}
+	}
 	if m.query != "" && !m.searching {
 		left += t.Lbl.Render("  mint ") + t.Val.Render(m.query+"…") + t.Dim.Render("  esc clears")
 	}
@@ -547,17 +617,19 @@ func (m *Model) scrTrades(w, bh int) string {
 		right = t.Lbl.Render(fmt.Sprintf("%dW  ", wins)) + t.Money(tot, true, false).Render(core.Usd(tot, true, m.view.Price, true, 2))
 	}
 	if w >= 100 {
-		right += t.Dim.Render("   o sort  O order  f filter  / find  c copy  enter details")
+		right += t.Dim.Render("   o sort  O order  f filter  t skips  / find  c copy  enter details")
 	} else if w >= 70 {
-		right += t.Dim.Render("   o sort  f filter  / find  c copy")
+		right += t.Dim.Render("   o sort  f filter  t skips  / find")
 	}
 	out := []string{lr(left, right, w)}
 	if m.searching {
 		m.search.SetWidth(max(10, w-4))
 		out = append(out, m.search.View())
 	}
-	var why []string // x: which filters would have blocked the selected trade
-	if m.tradeInfo && n > 0 {
+	var why []string                                   // x: which filters would have blocked the selected trade
+	if n > 0 && tl[min(m.tradeSel, n-1)].Skip != nil { // v5.1: a skip row always shows its panel
+		why = m.skipLines(tl[min(m.tradeSel, n-1)].Skip, w)
+	} else if m.tradeInfo && n > 0 {
 		why = append([]string{m.rule("BLOCKED BY", "", w)}, m.whyLines(tl[min(m.tradeSel, n-1)], w)...)
 	}
 	rowsAvail := bh - len(out) - 1 - len(why)
@@ -635,6 +707,126 @@ func (m *Model) whyLines(tr *core.Trade, w int) []string {
 			pre = t.Warn.Render(m.dot()) + " "
 		}
 		out[i] = pre + t.Val.Render(l)
+	}
+	return out
+}
+
+// skipCells: a skipped token's row in the Trades table: type "SK·T2" / "SK·RA", the paper P&L (the trigger's shadow window at the
+// live size; "~" = calibrated shown when there is one) in the P&L columns, the filter in the exit column, the price move in held.
+func (m *Model) skipCells(r *core.SkipRow, cols []tcol) ([]string, []lipgloss.Style) {
+	t := m.th
+	v := m.view
+	val, has := r.Paper, r.HasPaper
+	mark := " "
+	if r.HasCal {
+		val, has, mark = r.Cal, true, "~"
+	}
+	lam := int64(val * core.LAM)
+	ps := t.Dim
+	if has {
+		ps = t.Money(lam, true, false).Faint(true)
+	}
+	wide := false // a table with a path column carries the filter there; a narrow one in the exit column
+	for _, c := range cols {
+		wide = wide || c.title == "path"
+	}
+	var cells []string
+	var sts []lipgloss.Style
+	for _, c := range cols {
+		s, st := "", t.Dim
+		switch c.title {
+		case "time":
+			if r.T != 0 {
+				s = core.T12(float64(r.T), true)
+			}
+		case "type", "typ":
+			s, st = "S"+m.g("\u00b7", ".")+r.Kind, t.Warn
+			if c.w < 4 {
+				s = "S" + r.Kind
+			}
+		case "ty":
+			s, st = "S"+r.Kind[:1], t.Warn
+		case "mint":
+			s, st = core.Short(r.Mint, c.w), t.Lbl
+		case "P&L SOL":
+			s = core.G.Dash
+			if has {
+				s, st = core.Sol(lam, true, 4, true)+mark, ps
+			}
+		case "USD":
+			if has && v.Price != 0 {
+				s, st = core.Usd(lam, true, v.Price, true, 2), ps
+			}
+		case "%":
+			if has && v.Filt != nil && v.Filt.LiveSize > 0 {
+				s, st = core.PctS(val/v.Filt.LiveSize, true, 1, true), ps
+			}
+		case "exit":
+			s, st = "skip", t.Warn
+			if r.Withheld {
+				s = "held"
+			}
+			if r.Cat != "filter" {
+				s, st = map[string]string{"busy": "busy", "not a setup": "n/a"}[r.Cat], t.Dim
+			}
+			if !wide {
+				s = r.Name
+			}
+			s = core.RuneSlice(s, c.w)
+		case "path", "client": // the wide columns: the filter that blocked it, then the shadow window's price move
+			if c.title == "client" {
+				break
+			}
+			s, st = r.Name, t.Warn
+			if r.Cat != "filter" {
+				st = t.Dim
+			}
+			if r.Move != nil && r.Move.N > 0 {
+				s += fmt.Sprintf(" %+.0f/%+.0f%%", r.Move.Max, r.Move.Min)
+			}
+			s = core.RuneSlice(s, c.w)
+		case "":
+			s, st = " ", t.Acc
+		}
+		cells = append(cells, s)
+		sts = append(sts, st)
+	}
+	return cells, sts
+}
+
+// skipLines: the selected skip row's panel under the table: the filter, the numbers, the paper / calibrated value, the move.
+func (m *Model) skipLines(r *core.SkipRow, w int) []string {
+	t := m.th
+	head := fmt.Sprintf("%s %s skipped by %s", r.Kind, core.Short(r.Mint, 12), r.Name)
+	if r.Withheld {
+		head = fmt.Sprintf("%s %s: window armed, every try withheld by %s", r.Kind, core.Short(r.Mint, 12), r.Name)
+	}
+	val := "no paper (no shadow window"
+	if r.Kind == "RA" {
+		val += ": re-arm windows have none)"
+	} else {
+		val += " filled)"
+	}
+	if r.HasPaper {
+		val = "paper " + core.FS(r.Paper, 4) + "◎"
+		if r.HasCal {
+			val += ", calibrated " + core.FS(r.Cal, 4) + "◎"
+		}
+		if r.Move != nil && r.Move.N > 0 {
+			val += fmt.Sprintf(", move %+.1f%% / %+.1f%% (%d trades)", r.Move.Max, r.Move.Min, r.Move.N)
+		}
+	}
+	txt := head + " · " + val
+	if r.Detail != "" {
+		txt += " · " + r.Detail
+	}
+	ls := core.WrapText(txt, max(10, w-2), 0)
+	if len(ls) > 4 {
+		ls = ls[:4]
+	}
+	out := []string{m.rule("SKIP", "", w)}
+	for _, l := range ls {
+		out = append(out, "  "+t.Val.Render(l))
 	}
 	return out
 }

@@ -216,7 +216,7 @@ func main() {
 	noLinks := fs.Bool("no-links", false, "no OSC 8 hyperlinks (mints -> GMGN, signatures -> Solscan)")
 	screen := fs.String("screen", "", "render the UI once at WxH as plain text to stdout, then exit (--tab, --page)")
 	tab := fs.Int("tab", 1, "with --screen: the tab 1-8")
-	page := fs.String("page", "", "with --screen: help | detail | splash | today")
+	page := fs.String("page", "", "with --screen: help | detail | splash | today | skips | skipsall | find:%MINT%[,skips]")
 	screens := fs.String("screens", "", "write text screenshots of every tab to DIR and exit")
 	sizes := fs.String("sizes", "200x35,160x50,120x40,80x24,50x30", "with --screens: WxH list")
 	screensTag := fs.String("screens-tag", "", "")

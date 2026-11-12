@@ -592,6 +592,9 @@ type View struct {
 	FAB FeeABSum
 	// the Filters tab (filters.go): what each pre-send filter blocked and would have made
 	Filt *FiltReport
+	// v5.1: every skipped trigger / withheld window (skips.go) and the same as Trades rows (Kind "SKIP", negative IDs)
+	Skips      []SkipRow
+	SkipTrades []*Trade
 	// v4: the shadow's paper split by what live did with each trigger (the snapshot's "paper" line, the Engine tab)
 	Paper PaperSplit
 	Added []string   // v4: the ADDED WINDOWS lines (dip41 / dip42 log-only windows; nil when none)
@@ -982,6 +985,12 @@ func BuildView(ctx *Ctx, scope int) *View {
 	v.Alerts = makeAlerts(v, ctx, M)
 	v.Filt = M.Filt.Report(ctx.GcrSeedPath(), ctx.CalibTable()) // the whole file (every session), cached per records version
 	v.Paper = M.Filt.Paper()
+	v.Skips = M.Skips.Rows(M.Filt, v.Filt)
+	v.SkipTrades = make([]*Trade, len(v.Skips))
+	for i := range v.Skips {
+		r := &v.Skips[i]
+		v.SkipTrades[i] = &Trade{ID: -(i + 1), Kind: "SKIP", T: r.T, Mint: r.Mint, Rearm: r.Kind == "RA", Skip: r}
+	}
 	v.Added = M.Add.Lines()
 	M.V5.flagFn = func(w int64, mint string) []string { return filtFlags(v.Filt, w, mint) }
 	v.V5 = M.V5.Report(int64(ctx.Now()*1e9), ctx.ProbeTape, ctx.Multi)

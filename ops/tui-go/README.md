@@ -766,3 +766,19 @@ images of a few for a phone: DejaVu Sans Mono on a dark background, roughly what
   values are exercised by the pty tests, not by the goldens.
 - The big digits and the wordmark use half / full blocks (▀▄█): phone fonts with poor block glyphs look rough; `--ascii`
   switches to plain digits and a plain "REWIND".
+
+## v5.1 (11-12): skipped tokens in the Trades table
+
+- **Switch `t` on the Trades tab** (off by default): off → **filter skips** → **every skip** (also "busy": another window / position /
+  ATA in the way, and "n/a": not a setup, e.g. re-arm with no 6% holder left or the token too old) → off. The skips merge into the
+  trades table by time as rows typed `S·T2` / `S·RA`; exit column `skip` (an arm-time skip), `held` (a window that armed but every
+  try was withheld: rival gate, bot depth, FP-NOBOT, re-arm fleet, SKIP-2, blocklist per send), `busy`, `n/a`; the path column = the
+  filter's name + the shadow window's price move (max / min %). P&L / % = the trigger's shadow window (row c) at the live size,
+  calibrated (`~`) when the calibration table is loaded; "–" = no value (re-arm windows have no shadow window; a T2 shadow that never
+  filled). The selected skip row always shows a SKIP panel under the table: filter, paper / calibrated value, move, and the record's
+  numbers (whale / dump, holders, the ledger / blocklisted wallet, fresh %, mint ledger, creator). Enter does nothing on a skip row.
+  The header adds `+ filter skips N  paper W/L sum cal sum`. Trades' own counts / totals stay trades-only.
+- **Mint search** (`/`): `%abc%`, `abc%` and `abc` all mean "mint contains abc", on trades and skips alike.
+- Code: `internal/core/skips.go` (SkipAcc: every presend_live_skip; Rows joins the Filters accumulator's shadow paper and the
+  Filters report's withheld windows), `internal/ui/trades.go` (skipRows, skipCells, skipLines, mintQuery). `--screen WxH --page
+  skips | skipsall | find:%MINT%[,skips]` renders it headless. Snapshot / JSON unchanged (r82, r89 identical to v5).

@@ -116,6 +116,8 @@ type Timing struct {
 type Trade struct {
 	ID   int
 	Kind string
+	// v5.1 (11-12): a skipped trigger shown in the Trades table (Kind "SKIP"; nil for real trades; never in View.Trades)
+	Skip *SkipRow
 	// dip26: a pre-send position of a re-arm window (its records say "kind":"rearm")
 	Rearm bool
 	S     int
@@ -622,6 +624,8 @@ type Model struct {
 	PathEdges map[string]*PathEdge
 	// the Filters tab: the records its table needs (whole file, every session; filters.go)
 	Filt *FiltAcc
+	// v5.1: every presend_live_skip record (the Trades table's skip rows; skips.go)
+	Skips *SkipAcc
 	// v4: the engine's build from the log's "ENGINE BUILD: snipe_engine_dip43c sha256 ..." line (dip39+; the latest start's)
 	EngBuild, EngSHA string
 	// v4: the ADDED WINDOWS (dip41 / dip42 log-only windows; added.go) and the dip43 records (dip43.go)
@@ -644,7 +648,7 @@ func NewModel(failBuyFee int64, logKeep int) *Model {
 	M := &Model{jsess: -1, lsess: -1, LogKeep: logKeep, LogRing: NewRing(logKeep), LogImp: NewRing(max(200, logKeep/2)),
 		RPC: map[[2]string]*RPCStat{}, PollErr: map[int]int64{}, PathErr: map[string]map[int]int64{},
 		PathKind: map[string]string{}, PathTotal: map[string]int64{}, armInfo: map[[2]int64]armRec{},
-		EvCount: map[string]int{}, Filt: newFiltAcc(), Add: newAddAcc(), D43: newD43Acc(), V5: newV5Acc()}
+		EvCount: map[string]int{}, Filt: newFiltAcc(), Add: newAddAcc(), D43: newD43Acc(), V5: newV5Acc(), Skips: newSkipAcc()}
 	M.lpend = LogCfg{}
 	if failBuyFee > 0 {
 		M.FailBuyFee, M.FailBuyFeeSrc = failBuyFee, "cmdline"
@@ -735,9 +739,10 @@ func (M *Model) feedOne(line, ev []byte) {
 			M.Bad++
 		}
 	}()
-	M.Filt.feed(ev, line) // the Filters tab (its own presend_* records, before the model ignores the shadow's)
-	M.Add.feed(ev, line)  // v4: the added windows (dip41 / dip42)
-	M.D43.feed(ev, line)  // v4: the dip43 records (guard, CURVE band, true balances, fee tier, exits, shadows)
+	M.Skips.feed(ev, line) // v5.1: the Trades table's skip rows
+	M.Filt.feed(ev, line)  // the Filters tab (its own presend_* records, before the model ignores the shadow's)
+	M.Add.feed(ev, line)   // v4: the added windows (dip41 / dip42)
+	M.D43.feed(ev, line)   // v4: the dip43 records (guard, CURVE band, true balances, fee tier, exits, shadows)
 	M.V5.tr.curT = M.CurT
 	M.V5.feed(ev, line) // v5: dip46 probes / A/B, dip47 filter state / pause / re-arm cap / fleet / GRPSIGN / funder; hours, landing
 	switch string(ev) {
