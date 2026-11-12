@@ -261,3 +261,42 @@ func TestTradingState(t *testing.T) {
 		t.Fatal("an ended run has no trading state")
 	}
 }
+
+// TestD48D49: the fresh-holders skip, the follower flow and the rival gate (record shapes from sniper-dip49 84807f7a; r86 / r87).
+func TestD48D49(t *testing.T) {
+	M := NewModel(0, 100)
+	for _, r := range []string{
+		`{"ev":"presend_live_filter_state","fv":0,"fh":"a","src":"start","state":{"fresh_skip":"live","fresh_skip_spec":"35:20","fresh_skip_ra_def":"f3","rival_gate":"live","rival_gate_spec":"0:2:1","flow_log":true},"changed":{}}`,
+		`{"ev":"presend_live_skip","why":"fresh_holders","fresh":45.07,"fresh_n":5,"thr":35.0,"trig":{"sig":"S1","mint":"MintA","t":1794450000000000000}}`,
+		`{"ev":"presend_live_skip","kind":"rearm","why":"fresh_holders","fresh":44.98,"fresh_n":5,"thr":20.0,"mint":"MintB","dump":{"t":1794450405101217459}}`,
+		`{"ev":"presend_live_rival_gate","w":13,"mint":"MintC","kind":"t2","mode":"live","tries":187,"passed":163,"withheld":24,"would":0,"open":0,"rivals_min":0,"dev_age_h":null,"dev_age_src":"error","t":1794455422198179699}`,
+		`{"ev":"presend_live_fill","w":1,"mint":"MintD","kind":"t2","spend":1000000000,"t":1794455000000000000,"rival_gate":{"rivals":2,"dev_age_h":0.5,"young":true,"dev_age_src":"rpc","on":"log","blocked":true},"fresh_skip":{"n":5,"pct":40.0,"thr":35.0,"would_skip":true}}`,
+		`{"ev":"presend_live_flow","w":1,"mint":"MintD","kind":"t2","closed":"exit","per_slot":[{"dslot":0,"buy_sol":{"bots":0.7,"fleet":0,"retail":0,"rivals":0,"dumper":0,"us":0},"sell_sol":{"bots":0,"fleet":0,"retail":0,"rivals":0,"dumper":5.6,"us":0}},{"dslot":2,"buy_sol":{"bots":0,"fleet":1.0,"retail":0,"rivals":0,"dumper":0,"us":0},"sell_sol":{}}],"tot1":{"buy":0.7,"sell":5.6},"tot2":{"buy":1.7,"sell":5.6}}`,
+		`{"ev":"presend_live_realized","w":1,"mint":"MintD","kind":"t2","pnl":-100000000}`,
+	} {
+		M.FeedJSONL([][]byte{[]byte(r)})
+	}
+	if M.Bad != 0 {
+		t.Fatalf("bad %d", M.Bad)
+	}
+	R := M.V5.Report(0, nil, nil)
+	f := R.Fill(1, "MintD")
+	if f == nil || f.FlowCell() != "0.70" || f.RivalCell() != "2/0.5h" || f.Flow.Buy2["fleet"] != 1.0 || !f.Fresh.Would {
+		t.Fatalf("fill %+v", f)
+	}
+	if j := v5Sec(R, "fresh_skip").JSON; jget(j, "skips_t2") != 1 || jget(j, "skips_ra") != 1 || jget(j, "pnl_would") != int64(-100000000) {
+		t.Fatalf("fresh %v", j.Vals)
+	}
+	if j := v5Sec(R, "rival_gate").JSON; jget(j, "windows_withheld") != int64(1) || jget(j, "tries_withheld") != int64(24) || jget(j, "fills_block") != int64(1) {
+		t.Fatalf("rival %v", j.Vals)
+	}
+	if v5Sec(R, "flow") == nil {
+		t.Fatal("flow")
+	}
+	FR := M.Filt.Report("", nil)
+	for _, k := range []string{"fresh_holders", "rgate_live"} {
+		if r, ok := FR.Row(k); !ok || r.Blocked == 0 {
+			t.Fatalf("row %s %+v", k, r)
+		}
+	}
+}

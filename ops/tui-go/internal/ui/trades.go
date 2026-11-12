@@ -235,6 +235,17 @@ func (m *Model) tradeCells(tr *core.Trade, cols []tcol) ([]string, []lipgloss.St
 			if f := m.d43Of(tr); f != nil {
 				s, st = f.Arm, t.Acc
 			}
+		case "b+1": // v5 (dip48)
+			if f := m.v5Of(tr); f != nil {
+				s, st = f.FlowCell(), t.Lbl
+			}
+		case "riv": // v5 (dip49)
+			if f := m.v5Of(tr); f != nil {
+				s, st = f.RivalCell(), t.Lbl
+				if f.Rival != nil && f.Rival.Blocked {
+					st = t.Warn
+				}
+			}
 		case "fv": // v5 (dip47)
 			if f := m.v5Of(tr); f != nil {
 				s, st = f.FvCell(), t.Lbl
@@ -282,10 +293,22 @@ func (m *Model) hlBg(tr *core.Trade) (color.Color, float64) {
 func (m *Model) tradeTable(w int, rows []*core.Trade, sel int) string {
 	t := m.th
 	cols := tradeCols(w, m.usdFirst && m.view.Price != 0, m.viaOn(), m.armOn())
+	var add5 []tcol
 	if m.fvOn() && w >= 110 { // v5 (dip47): the filter state's version at the window's arm ("*": it moved before the fill)
+		add5 = append(add5, tcol{"fv", 4, true})
+	}
+	if R := m.view.V5; R != nil && w >= 110 {
+		if R.FlowOn { // v5 (dip48): outside buy SOL through fill+1
+			add5 = append(add5, tcol{"b+1", 5, true})
+		}
+		if R.RivalOn { // v5 (dip49): rivals / dev age at the filling try
+			add5 = append(add5, tcol{"riv", 7, true})
+		}
+	}
+	if len(add5) > 0 {
 		for i, c := range cols {
 			if c.title == "client" {
-				cols = append(cols[:i:i], append([]tcol{{"fv", 4, true}}, cols[i:]...)...)
+				cols = append(cols[:i:i], append(add5, cols[i:]...)...)
 				break
 			}
 		}

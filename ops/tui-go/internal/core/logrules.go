@@ -185,6 +185,35 @@ var _ = func() bool {
 				sl, _ := mNum(r, "slots")
 				return true, fmt.Sprintf("fleet %.0f < %.0f in %.0f slots", n, mn, sl)
 			}})
+	LogRules = append(LogRules,
+		LogRule{Key: "fresh48", Code: "FR", Name: "fresh holders (log)", Short: "fresh holders", ModeKey: "fresh_skip", Verdict: "LOG new", Why: "FRESH-HOLDERS skip (dip48)",
+			Note:    "measured (real fills); the fresh-holders share at the arm >= its lane's threshold (fresh_skip.would_skip on the fill)",
+			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "fresh_skip") != nil },
+			Flag: func(_ *RuleState, f map[string]any) (bool, string) {
+				x := mObj(f, "fresh_skip")
+				if x == nil || !mBool(x, "would_skip") {
+					return false, ""
+				}
+				p, _ := mNum(x, "pct")
+				th, _ := mNum(x, "thr")
+				return true, fmt.Sprintf("fresh %.1f%% >= %.0f%%", p, th)
+			}},
+		LogRule{Key: "rgate", Code: "RG", Name: "rival gate (log)", Short: "rival gate", ModeKey: "rival_gate", Verdict: "LOG new", Why: "RIVAL GATE T2 (dip49)",
+			Note:    "measured (real fills); the filling T2 try had rivals <= R0, or <= R2 with a young dev (rival_gate.blocked; fail-open not counted)",
+			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "rival_gate") != nil },
+			Flag: func(_ *RuleState, f map[string]any) (bool, string) {
+				x := mObj(f, "rival_gate")
+				if x == nil || !mBool(x, "blocked") || mStr(x, "open") != "" {
+					return false, ""
+				}
+				r, _ := mNum(x, "rivals")
+				a, ok := mNum(x, "dev_age_h")
+				age := "?"
+				if ok {
+					age = fmt.Sprintf("%.1f h", a)
+				}
+				return true, fmt.Sprintf("rivals %.0f, dev age %s", r, age)
+			}})
 	return true
 }()
 

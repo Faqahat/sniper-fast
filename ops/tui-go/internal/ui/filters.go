@@ -340,6 +340,8 @@ var fltVerdicts = map[string]fltVerdict{
 	"grp_t2":        {vgLive, "LIVE new", "group at signing (dip47)"},
 	"mint_ledger":   {vgLive, "LIVE new", "mint ledger live (dip43)"},
 	"fanout_live":   {vgLive, "LIVE new", "fan-out live (dip43)"},
+	"fresh_holders": {vgLive, "LIVE new", "fresh holders (dip48)"},
+	"rgate_live":    {vgLive, "LIVE new", "rival gate T2 (dip49)"},
 	"rearm_cap":     {vgLive, "LIVE new", "re-arm fills per mint (dip47)"},
 	"pause_window":  {vgLive, "LIVE new", "PKT pause window (dip47)"},
 	"rfleet_live":   {vgLive, "LIVE new", "re-arm fleet rule (dip47)"},

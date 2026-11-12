@@ -352,6 +352,7 @@ type FiltAcc struct {
 	// v5 fix (11-11, r84): each switchable filter's mode over the run (start flags, dip43 / dip47 control keys, the filter state),
 	// so a row's label says what the filter really did (a LIVE mint ledger is a LIVE row, not "mint ledger (log)")
 	modes map[string][]string // state key -> modes in order (consecutive duplicates folded)
+	rgWin []fGateWin          // v5 (dip49): T2 windows with rival-gate withheld tries
 
 	cache     *FiltReport
 	cacheVer  int64
@@ -511,6 +512,18 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		}
 		if json.Unmarshal(line, &r) == nil {
 			F.d43Modes(r.Cfg)
+		}
+		return
+	case "presend_live_rival_gate": // v5 (dip49): a T2 window's rival-gate summary; live withheld windows
+		var r struct {
+			W        int64           `json:"w"`
+			Mint     string          `json:"mint"`
+			Withheld int64           `json:"withheld"`
+			T        json.RawMessage `json:"t"`
+		}
+		if json.Unmarshal(line, &r) == nil && r.Withheld > 0 {
+			F.rgWin = append(F.rgWin, fGateWin{k: FKey{r.W, r.Mint}, kind: "T2", t: rawInt(r.T)})
+			F.ver++
 		}
 		return
 	case "presend_live_rearm_fleet": // v5 (dip47): a re-arm window's fleet summary; live withheld windows
@@ -747,6 +760,14 @@ func (F *FiltAcc) feed(ev, line []byte) {
 				// dip37: the re-arm's HYBRID-2 m2_unseen gate skips
 				if r.Why != nil && *r.Why == "rearm_m2_unseen" && r.Dump != nil {
 					F.skips = append(F.skips, fSkip{why: "m2_unseen", sig: "", mint: r.Mint, t: rawInt(r.Dump.T), ra: true})
+				}
+				// v5 (dip48): the re-arm lane of the fresh-holders skip (counted; no shadow window)
+				if r.Why != nil && *r.Why == "fresh_holders" {
+					var t int64
+					if r.Dump != nil {
+						t = rawInt(r.Dump.T)
+					}
+					F.skips = append(F.skips, fSkip{why: "fresh_holders", sig: "", mint: r.Mint, t: t, ra: true})
 				}
 				// v5 (dip47): the re-arm cap per mint (counted; a re-arm has no shadow window)
 				if r.Why != nil && *r.Why == "rearm_cap" {
@@ -1281,7 +1302,7 @@ var d37LiveFilters = []struct{ why, name string }{{"wh_loss", "whale loss (T2)"}
 // modeKeys: the switchable filters whose mode the rows follow (filter-state / control-key names).
 var modeKeys = map[string]bool{"mint_ledger": true, "fanout": true, "fpnb_strict": true, "quiet": true, "quiet3a": true, "create_slot": true,
 	"young_age": true, "lone_whale": true, "cr_loss": true, "blocklist_arm": true, "breaker": true, "rearm_fleet": true, "grp_t2": true,
-	"whale": true, "holder": true, "skip2": true}
+	"whale": true, "holder": true, "skip2": true, "fresh_skip": true, "rival_gate": true}
 
 // setMode notes key's mode now ("live" / "log"; anything else is ignored).
 func (F *FiltAcc) setMode(key, m string) {
@@ -1348,13 +1369,13 @@ func (F *FiltAcc) liveName(name, key string) string {
 // liveModeKey: the control key of a LIVE row's skip reason.
 var liveModeKey = map[string]string{"quiet": "quiet", "create_slot": "create_slot", "young_age": "young_age", "lone_whale": "lone_whale",
 	"breaker": "breaker", "cr_loss": "cr_loss", "cr_unfollowed": "cr_loss", "quiet3_a": "quiet3a", "blocklist": "blocklist_arm",
-	"mint_ledger": "mint_ledger", "fanout_live": "fanout", "grp_t2": "grp_t2"}
+	"mint_ledger": "mint_ledger", "fanout_live": "fanout", "grp_t2": "grp_t2", "fresh_holders": "fresh_skip", "rgate_live": "rival_gate"}
 
 // d43LiveFilters: dip43's LIVE arm-time skips (A6 mint ledger, A4 fan-out), shown once one fired or the filter ran live.
 var d43LiveFilters = []struct{ why, name, key string }{{"mint_ledger", "mint ledger", "mint_ledger"}, {"fanout_live", "fan-out", "fanout"}}
 
 // d47LiveFilters: dip47's LIVE skips (v5), shown once one fired: GRPSIGN's T2 skip at the arm (calibrated paper) and the re-arm cap
-var d47LiveFilters = []struct{ why, name string }{{"grp_t2", "group at signing (T2)"}, {"rearm_cap", "re-arm cap"}}
+var d47LiveFilters = []struct{ why, name string }{{"grp_t2", "group at signing (T2)"}, {"rearm_cap", "re-arm cap"}, {"fresh_holders", "fresh holders (dip48)"}}
 
 // Report computes the table (cached while no record came and the seed is the same).
 func (F *FiltAcc) Report(seedPath string, cal *Calib) *FiltReport {
@@ -1553,6 +1574,9 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		if f.why == "rearm_cap" {
 			note = "counted; a re-arm has no shadow window (no value)"
 		}
+		if f.why == "fresh_holders" {
+			note = "calibrated (paper -> cal) on the T2 lane; re-arm lane skips counted (no shadow window)"
+		}
 		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name, Type: "LIVE", Note: note}
 	}
 	for _, f := range d37LiveFilters {
@@ -1677,6 +1701,27 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 				Kind: "RA", Mint: g.k.Mint, W: g.k.W, Sig: fmt.Sprintf("w%d", g.k.W)})
 		}
 		row.Note = fmt.Sprintf("counted; re-arm windows with withheld tries: %d never filled (no shadow: no value), %d filled later (real P&L %s)", row.Blocked, later, fmtSigned(laterSol, 3))
+		R.Rows = append(R.Rows, row)
+	}
+	// v5 (dip49) the rival gate live: T2 windows whose tries it withheld (blocked = never filled: the shadow's paper, calibrated)
+	if len(F.rgWin) > 0 {
+		row := FiltRow{Key: "rgate_live", Name: F.liveName("rival gate (T2)", "rival_gate"), Type: "LIVE"}
+		later, laterSol := 0, 0.0
+		for _, g := range F.rgWin {
+			if F.fills[g.k.W] {
+				later++
+				laterSol += F.real[g.k]
+				continue
+			}
+			row.Blocked++
+			v, vok, tsig, mv := F.winPaper(g.k.W, g.kind)
+			if vok {
+				tally(&row, v)
+			}
+			R.Items = append(R.Items, FiltItem{T: g.t, Live: true, Filter: "rgate_live", Name: row.Name, Rules: []string{"rgate_live"}, Names: []string{row.Name},
+				Kind: g.kind, Mint: g.k.Mint, W: g.k.W, Scored: vok, Sol: v, Sig: tsig, Move: mv})
+		}
+		row.Note = fmt.Sprintf("calibrated (paper -> cal); T2 windows with withheld tries: %d never filled, %d filled later (real P&L %s)", row.Blocked, later, fmtSigned(laterSol, 3))
 		R.Rows = append(R.Rows, row)
 	}
 	// dip36 LIVE no-bot gate: windows whose sends it withheld (blocked = never filled; the ones that filled later in the note)

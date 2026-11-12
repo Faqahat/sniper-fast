@@ -263,7 +263,10 @@ type V5Fill struct {
 	Grp              *v5GrpFill
 	Fleet            *v5FleetFill
 	Fund             *v5FundFill
-	AB               string // "bypass" / "live" arms, "f1:bypass f2:live"
+	AB               string       // "bypass" / "live" arms, "f1:bypass f2:live"
+	Fresh            *v5FreshFill // dip48 fresh_skip on the fill
+	Flow             *v5Flow      // dip48 presend_live_flow
+	Rival            *v5RivalFill // dip49 rival_gate on the fill
 	ABWould          []string
 }
 
@@ -362,6 +365,7 @@ type V5Acc struct {
 	cacheVer       int64
 	cacheTape      *ProbeTape
 	curTape        *ProbeTape                          // the tape the probes were priced on (nil = none)
+	d48            d48                                 // dip48 / dip49 records (d48.go)
 	tr             trading                             // the trading state's records (trading.go)
 	brkThr, brkWin string                              // the breaker's spec (run_start presend_live.breaker "2:0.1:30:60")
 	flagFn         func(w int64, mint string) []string // the Filters report's flags of a fill (the view sets it)
@@ -378,7 +382,7 @@ var v5Evs = map[string]bool{"presend_live_dip46": true, "presend_live_ledger_mod
 	"presend_live_probe_land": true, "presend_live_probe_end": true, "presend_live_probe_filled": true, "presend_live_filter_ab": true,
 	"presend_live_arm": true, "presend_live_skip": true, "presend_live_rearm_defer": true, "presend_live_fill": true, "presend_live_realized": true,
 	"presend_live_exit": true, "presend_live_filter_state": true, "presend_live_grpsign": true, "presend_live_rearm_fleet": true,
-	"presend_live_funder": true, "presend_attempt_land": true, "run_end": true, "presend_live_breaker": true, "run_start": true, "presend_live_stop": true}
+	"presend_live_funder": true, "presend_attempt_land": true, "run_end": true, "presend_live_breaker": true, "run_start": true, "presend_live_stop": true, "presend_live_flow": true, "presend_live_rival_gate": true}
 
 var (
 	v5MsFirst = `"ms_send_to_first_rx":`
@@ -440,6 +444,7 @@ func (A *V5Acc) feed(ev, line []byte) {
 	A.bump()
 	w := mW(o)
 	A.tradeFeed(e, o)
+	A.d48Feed(e, o)
 	switch e {
 	case "run_start":
 		if pl := mObj(o, "presend_live"); pl != nil {
@@ -582,6 +587,7 @@ func (A *V5Acc) feed(ev, line []byte) {
 				sp, _ = mNum(o, "sol_in")
 			}
 			f.Spend = int64(sp)
+			f.Fresh, f.Rival = freshOf(o), rivalOf(o)
 			if x, ok := mNum(o, "fv"); ok {
 				f.Fv, f.HasFv = int64(x), true
 				f.Fh = mStr(o, "fh")
@@ -822,6 +828,8 @@ type V5Report struct {
 	Hours       *HoursTable
 	ProbeRows   []ProbeRow
 	FvOn        bool // a trade row carries fv (dip47)
+	FlowOn      bool // a fill has a dip48 flow record
+	RivalOn     bool // a fill has a dip49 rival_gate verdict
 	Pause       *PauseView
 }
 
@@ -859,6 +867,7 @@ func (A *V5Acc) Report(now int64, tape *ProbeTape, multi *MultiRuns) *V5Report {
 		f := A.fills[w]
 		f.Pnl, f.HasPnl = A.realW[w], A.realHas[w]
 		f.Exit = A.exitW[w]
+		f.Flow = A.d48.flows[FKey{w, f.Mint}]
 		if ab := A.abW[w]; ab != nil {
 			var ps []string
 			for _, k := range sortedKeysS(ab.arms) {
@@ -874,6 +883,12 @@ func (A *V5Acc) Report(now int64, tape *ProbeTape, multi *MultiRuns) *V5Report {
 		R.Fills = append(R.Fills, f)
 		if f.HasFv {
 			R.FvOn = true
+		}
+		if f.Flow != nil {
+			R.FlowOn = true
+		}
+		if f.Rival != nil {
+			R.RivalOn = true
 		}
 	}
 	R.ProbeRows = A.probeRows(tape)
@@ -904,7 +919,7 @@ func (A *V5Acc) Report(now int64, tape *ProbeTape, multi *MultiRuns) *V5Report {
 
 func (A *V5Acc) ruleSections(R *V5Report) []*D43Section {
 	var out []*D43Section
-	for _, f := range []func(*V5Report) *D43Section{A.secProbes, A.secAB, A.secFState, A.secPause, A.secCap, A.secFleet, A.secGrp, A.secFunder} {
+	for _, f := range []func(*V5Report) *D43Section{A.secProbes, A.secAB, A.secFState, A.secPause, A.secCap, A.secFleet, A.secGrp, A.secFunder, A.secFresh, A.secRival, A.secFlow} {
 		if s := f(R); s != nil {
 			out = append(out, s)
 		}
@@ -1268,11 +1283,12 @@ var fsGroups = []struct {
 	keys []string
 }{
 	{"ledgers", []string{"whale", "wh_kinds", "wh_loss", "holder", "holder_loss", "mint_ledger", "mint_ledger_sol", "blocklist_send", "blocklist_arm", "botdepth"}},
-	{"arm gates", []string{"quiet", "quiet3a", "create_slot", "young_age", "min_age_slots", "lone_whale", "cr_loss", "breaker", "s1", "grp_t2", "grp_t2_pct", "grp_t2_whale", "grpsign_log"}},
+	{"arm gates", []string{"quiet", "quiet3a", "create_slot", "young_age", "min_age_slots", "lone_whale", "cr_loss", "breaker", "s1", "grp_t2", "grp_t2_pct", "grp_t2_whale", "grpsign_log",
+		"fresh_skip", "fresh_skip_spec", "fresh_skip_ra_def"}},
 	{"re-arm", []string{"rearm", "rearm_r5", "size_rearm", "rearm_max_per_mint", "rearm_fleet", "rearm_fleet_spec", "fleet_log"}},
-	{"send", []string{"fpnb_t2", "fpnb_rearm", "fpnb_strict", "skip2", "floors", "curve_deep", "curve_deep_pct", "guard", "fee_tier", "routes", "k", "drop", "size_t2"}},
+	{"send", []string{"fpnb_t2", "fpnb_rearm", "fpnb_strict", "skip2", "rival_gate", "rival_gate_spec", "floors", "curve_deep", "curve_deep_pct", "guard", "fee_tier", "routes", "k", "drop", "size_t2"}},
 	{"exits", []string{"exit_ms", "tp", "sl", "exit_lots", "dump_exit"}},
-	{"pause / shadows", []string{"pause_window", "pause_now", "stall", "deadman", "fanout", "widedumper", "qf2", "qf2_size", "qf2_min_age", "probe46", "ab46", "funder_log", "limits"}},
+	{"pause / shadows", []string{"pause_window", "pause_now", "stall", "deadman", "fanout", "widedumper", "qf2", "qf2_size", "qf2_min_age", "probe46", "ab46", "funder_log", "flow_log", "limits"}},
 }
 
 func (A *V5Acc) secFState(R *V5Report) *D43Section {
@@ -2352,6 +2368,7 @@ func (f *V5Fill) Brief() string {
 	if f.AB != "" {
 		ps = append(ps, "A/B "+f.AB)
 	}
+	ps = append(ps, f.d48Brief()...)
 	return strings.Join(ps, " · ")
 }
 

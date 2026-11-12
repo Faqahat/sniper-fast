@@ -42,6 +42,13 @@ every v4 screen, `--snapshot` and `--json` byte-identical to v4 on r82; only the
   fleet (live)` (counted, no value: re-arm windows have no shadow; the pause has no record per trigger); LOG rows (registry)
   `group at signing (log)` and `re-arm fleet (log)` (**measured** on the real fills). Shown only once they acted / a fill carries
   the field.
+- **dip48 / dip49 (11-12)** (`internal/core/d48.go`): FRESH-HOLDERS SKIP (mode, spec T2:RA, the re-arm f1 / f3 definition; live
+  skips by lane with each window's fresh %; fills it would skip and their real P&L; Filters LIVE `fresh holders (dip48)` calibrated
+  on T2, LOG `fresh holders (log)` measured), FOLLOWER FLOW (`presend_live_flow`: per fill outside buy / sell SOL through +1 / +2,
+  +1 buys by class; trade column `b+1`; the realized fills by +1 buy tercile with avg P&L), RIVAL GATE (mode, spec, T2 windows sent /
+  withheld / would, rivals min and dev age per window, verdicts on fills; Filters LIVE `rival gate (T2)` on withheld windows that never
+  filled, calibrated, LOG `rival gate (log)` measured; trade column `riv` = rivals / dev age). The keys are in the filter-state
+  timeline; the rival gate is per try, never a PAUSED state.
 - **The real trading state (11-12, after r85)** (`internal/core/trading.go`): while the run is RUNNING the header (and the RUN
   panel, Health's `trading` line, the snapshot's `trading` line) shows what the engine really does, in colour: `PAUSED: breaker
   until 6:35 AM` (presend_live_breaker: trip at the record's arrival, + pause_min; ends early at the control key's `breaker`
