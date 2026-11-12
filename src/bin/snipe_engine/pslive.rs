@@ -269,6 +269,7 @@ const D46FLAGS: [&str; 5] = ["--presend-live-probe", "--presend-live-probe-max-p
 pub mod psgrp47;
 const D47FLAGS: [&str; 8] = ["--presend-live-grpsign-log", "--presend-rearm-max-per-mint", "--presend-live-pause-window", "--presend-live-rearm-fleet",
     "--presend-live-rearm-fleet-mode", "--presend-live-funder-log", "--presend-live-funder-rpc", "--presend-live-funder-rps"];
+const D48FLAGS: [&str; 3] = ["--presend-live-flow-log", "--presend-live-fresh-skip", "--presend-live-fresh-skip-mode"];
 // dip47: hot control keys (sizes, thresholds, exits, floors, grp_t2) + the versioned FILTER STATE stamped on decision records
 #[path = "psctl47.rs"]
 pub mod psctl47;
@@ -277,6 +278,9 @@ pub mod psctl47;
 pub mod psrfleet47;
 #[path = "psfunder47.rs"]
 pub mod psfunder47;
+// dip48: the FOLLOWER-FLOW log (log only; off by default = dip47)
+#[path = "psflow48.rs"]
+pub mod psflow48;
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -593,6 +597,11 @@ pub struct Cfg {
     pub funder_log: bool,
     pub funder_rpc: Option<String>,
     pub funder_rps: u32,
+    /// dip48 --presend-live-flow-log on (LOG ONLY)
+    pub flow_log: bool,
+    /// dip48 --presend-live-fresh-skip T2PCT:RAPCT (None = off; a lane's 0 = off for it) and its mode (false = log)
+    pub fresh_skip: Option<(f64, f64)>,
+    pub fresh_live: bool,
 }
 
 /// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
@@ -640,7 +649,7 @@ impl Cfg {
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -790,12 +799,17 @@ impl Cfg {
             rearm_fleet: match arg(psrfleet47::FLAG) { None => None, Some(v) => Some(psrfleet47::spec_parse(&v).map_err(|e| anyhow::anyhow!("{} {e}", psrfleet47::FLAG))?) },
             rearm_fleet_live: match arg(psrfleet47::FLAG_MODE).as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("{} {x}: log | live", psrfleet47::FLAG_MODE) },
             funder_log: onoff("--presend-live-funder-log", false)?,
+            flow_log: onoff(psflow48::FLAG, false)?,
+            fresh_skip: match arg("--presend-live-fresh-skip") { None => None, Some(v) => Some(psctl47::fresh_parse(&v).map_err(|e| anyhow::anyhow!("--presend-live-fresh-skip {e}"))?) },
+            fresh_live: match arg("--presend-live-fresh-skip-mode").as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("--presend-live-fresh-skip-mode {x}: log | live") },
             funder_rpc: arg("--presend-live-funder-rpc").filter(|u| !u.starts_with("--")),
             funder_rps: match arg("--presend-live-funder-rps") { None => 15, Some(v) => v.parse::<u32>().ok().filter(|n| (1..=40).contains(n))
                 .with_context(|| format!("--presend-live-funder-rps {v}: RPC calls per second 1..40 (default 15)"))? },
             limits47: serde_json::json!({"max_sol": arg("--max-sol"), "kill_switch_sol": arg("--max-loss-sol"), "profit_lock": {"min_sol": arg("--profit-lock-min-sol"), "frac": arg("--profit-lock-frac")}}),
         };
         // dip47: the hold clocks it reads are kept only with the annotations on
+        if has("--presend-live-fresh-skip-mode") && c.fresh_skip.is_none() { bail!("--presend-live-fresh-skip-mode needs --presend-live-fresh-skip T2PCT:RAPCT"); }
+        if c.fresh_skip.is_some() && !c.f3_log { bail!("--presend-live-fresh-skip needs --presend-live-f3-log (the fresh-holders metric it acts on is computed there)"); }
         if has(psrfleet47::FLAG_MODE) && c.rearm_fleet.is_none() { bail!("{} needs {} N:SLOTS", psrfleet47::FLAG_MODE, psrfleet47::FLAG); }
         if !c.funder_log { if let Some(f) = ["--presend-live-funder-rpc", "--presend-live-funder-rps"].iter().find(|f| has(f)) { bail!("{f} needs --presend-live-funder-log on"); } }
         if has("--presend-live-funder-rpc") && c.funder_rpc.is_none() { bail!("--presend-live-funder-rpc needs a URL"); }
@@ -1126,6 +1140,8 @@ impl Cfg {
         // dip47: only when on (off: dip46's record)
         if self.grpsign { j["dip47"] = serde_json::json!({"grpsign_log": true, "t2_pct": psgrp47::T2_PCT}); }
         if let Some((n, k)) = self.rearm_fleet { j["rearm_fleet"] = serde_json::json!({"min": n, "slots": k, "mode": if self.rearm_fleet_live { "live" } else { "log" }}); }
+        if self.flow_log { j["flow_log"] = true.into(); }
+        if let Some((a, b)) = self.fresh_skip { j["fresh_skip"] = serde_json::json!({"t2": a, "rearm": b, "mode": if self.fresh_live { "live" } else { "log" }}); }
         if self.funder_log { j["funder_log"] = serde_json::json!({"rps": self.funder_rps, "rpc": if self.funder_rpc.is_some() { "--presend-live-funder-rpc" } else { "fam" }}); }
         j
     }
@@ -2552,6 +2568,8 @@ pub struct PsLive {
     rf47: psrfleet47::Rf47,
     /// dip47 FUNDER-CLUSTER log (LOG ONLY; None = off)
     fu47: Option<psfunder47::Funder>,
+    /// dip48 FOLLOWER-FLOW log (LOG ONLY; None = off)
+    fl48: Option<psflow48::Flow48>,
 }
 
 impl PsLive {
@@ -2796,7 +2814,7 @@ impl PsLive {
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet,
-            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None };
+            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2816,10 +2834,14 @@ impl PsLive {
         p.f47_start();
         // dip47 FUNDER-CLUSTER log (log only; None with the flag off)
         p.fu47 = PsLive::fu47_open(&p.cfg);
+        // dip48 FOLLOWER-FLOW log (log only)
+        if p.cfg.flow_log { p.fl48 = Some(psflow48::Flow48::new(&p.cfg.tag_wallets)); }
         Ok(p)
     }
 
     fn rec(&mut self, mut v: serde_json::Value) {
+        // dip48 (log only): an exit closes its fill's flow (its record first); a realized record gets the compact flow
+        if self.fl48.is_some() { self.fl48_on_rec(&mut v); }
         // dip47: the filter state's version on the decision records (fill / realized: the window's ARM state in full)
         self.stamp47(&mut v);
         // dip36 skip2 (log-only): its history sees the skips and disarms (nothing without the flag)
@@ -3144,6 +3166,8 @@ impl PsLive {
             self.det.trade(&t, &mut evs);
             // dip47 FUNDER-CLUSTER log (log only): first buys noted, a holder at >= 0.5% queued (nothing with it off)
             if self.fu47.is_some() { self.fu47_trade(&t); }
+            // dip48 FOLLOWER-FLOW log (log only; one map lookup per trade; nothing with it off)
+            if self.fl48.is_some() { self.fl48_trade(&t, &a.tx); }
             // dip37c: the per-send blocklist's cached listed holder (a listed wallet's trade only; nothing without the flag)
             if self.cfg.blocklist_send { self.bl_send_refresh(&e.mint, Some(&e.user)); }
             // dip38 (log-only): the launcher's trades, the shape's slot deltas, a new >= 3% buyer of an armed token queued (nothing with it off)
@@ -3379,10 +3403,15 @@ impl PsLive {
         } else { None };
         if grp47.is_some_and(|(p, thr)| p >= thr) { why = Some("grp_t2"); self.f47.grp_skips += 1; }
         // dip32 (log-only): QUIET3-A and the fresh holders
+        let mut fr48: Option<(f64, usize)> = None;
         let f3 = self.cfg.f3_log.then(|| {
             let (fresh, fresh_n) = f3_fresh(&self.det, &t.mint, &self.user, &whale, t.s);
+            fr48 = Some((fresh, fresh_n));
             serde_json::json!({"q3a": q3a, "n_120s": n120, "wh_dumps": whd, "fresh": fresh, "fresh_n": fresh_n, "r41": self.cur_r41})
         });
+        // dip48 FRESH-HOLDERS skip (T2 lane; never wide): the logged f3.fresh >= the lane's threshold -> skipped (live) / would (log)
+        let fs48 = if wide.is_none() { fr48.and_then(|(p, n)| self.fresh48(false, p, n)) } else { None };
+        if why.is_none() && fs48.as_ref().is_some_and(|x| x.3) { why = Some("fresh_holders"); }
         let tags = (self.cfg.f3_log && !self.cfg.tag_wallets.is_empty()).then(|| tags_json(&self.det, &t.mint, &self.cfg.tag_wallets)).flatten();
         // dip27 (log-only): the annotations
         let ann = self.cfg.ann.then(|| ann_arm(&self.det, &self.user, &t.mint, t.s));
@@ -3394,6 +3423,7 @@ impl PsLive {
             if wide.is_none() { *self.st.skips.entry(why).or_default() += 1; }
             let mut r = serde_json::json!({"ev": "presend_live_skip", "why": why, "trig": trig});
             if let Some((p, thr)) = grp47.filter(|_| why == "grp_t2") { r["grp_t2"] = serde_json::json!({"pct": p, "thr": thr}); }
+            if let Some(x) = fs48.as_ref().filter(|_| why == "fresh_holders") { r["fresh"] = x.0.into(); r["fresh_n"] = x.1.into(); r["thr"] = x.2.into(); }
             // dip41: a wide window's skip says so; a T2 skip carries the whale's dumper ledger values (each only with the ledger on)
             if let Some((k, v)) = wide { r["kind"] = k.key().into(); r[k.field()] = v.json(k); } else { self.wd_t2_fields(&mut r, &whale, t, age_slots); }
             if let Some(j) = &qj { r["quiet"] = j.clone(); r["quiet_skip"] = (why == "quiet").into(); }
@@ -3508,6 +3538,8 @@ impl PsLive {
         if wide.is_none() { self.st.armed += 1; }
         let mut r = serde_json::json!({"ev": "presend_live_arm", "w": id, "trig": trig, "en_slot": en_slot, "k": self.cfg.k, "spend": spend, "drop": self.cfg.drop,
             "lim0": t.p() * (1.0 - self.cfg.drop), "dry": self.cfg.dry});
+        // dip48 fresh-holders skip (log mode / below the threshold): its verdict on the arm record; kept for the fill record
+        if let Some(x) = fs48.as_ref() { let j = psctl47::fresh_json(x); r["fresh_skip"] = j.clone(); self.f47.fresh_w.insert(id, j); }
         // dip41: a wide window says so (its values kept for its fill / realized); a T2 arm carries the whale's dumper ledger values
         if let Some((k, v)) = wide { r["kind"] = k.key().into(); r[k.field()] = v.json(k); self.wd_armed(id, k, v); } else { self.wd_t2_fields(&mut r, &whale, t, age_slots); }
         if let Some(j) = qj { r["quiet"] = j; r["quiet_skip"] = false.into(); }
@@ -3666,8 +3698,12 @@ impl PsLive {
         if let Some(j) = self.g47_fill(&att) { rec["grpsign"] = j; }
         // dip47: the filling re-arm try's fleet verdict (only with the rule on)
         if let Some(v) = att.rf { rec["rearm_fleet"] = v.json(); }
+        // dip48: the window's fresh-holders verdict at its arm (only with the skip's flag)
+        if let Some(j) = self.f47.fresh_w.get(&att.w) { rec["fresh_skip"] = j.clone(); }
         // dip47 FUNDER-CLUSTER log (log only; nothing with it off)
         if let Some(j) = self.fu47_event(att.w, &t.mint, "fill", t.s) { rec["funder"] = j; }
+        // dip48 FOLLOWER-FLOW log (log only; nothing with it off)
+        self.fl48_fill(att.w, t);
         self.rec(rec);
         let sig = bs58::encode(&t.sig).into_string();
         let buy = Buy { sig: sig.clone(), w: att.w, slot: t.s, idx: t.i as u64, t_rx: t.t_rx, tokens: t.tok, sol_in: t.sol, fee, tip: att.tip, cost, round: 0, via: "feed" };
@@ -4329,6 +4365,8 @@ impl PsLive {
         self.hl_tick(slot_now);
         // dip47: the control file's new keys; the filter state (a change by any control reader -> a new fv now; ~1 s auto check)
         self.ctl47_check(false);
+        // dip48: the followed fills whose fill+3 passed (nothing with the log off)
+        if self.fl48.is_some() { self.fl48_close(slot_now, None); }
         self.pause47_tick();
         self.fs_tick();
         // dip38 (log-only): housekeeping and the ledgers' saves (nothing without its flags)
@@ -4688,7 +4726,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fu47.as_ref().map(|f| f.status()).unwrap_or_default() + &self.status43() + &self.b43_status() + &self.status46();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fu47.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fl48_status() + &self.status43() + &self.b43_status() + &self.status46();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -5065,13 +5103,14 @@ impl PsLive {
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, d43: Default::default(),
-            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None };
+            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None };
         // dip46: its modes (nothing with its flags off)
         p.p46_start();
         // dip47: the hot keys' start values, the control file's first read, the filter state fv 0
         p.f47_start();
         // dip47: the funder log without workers (the tests pump its queue)
         if p.cfg.funder_log { p.fu47 = Some(psfunder47::Funder::idle()); }
+        if p.cfg.flow_log { p.fl48 = Some(psflow48::Flow48::new(&p.cfg.tag_wallets)); }
         (p, atx, orx)
     }
 
@@ -5206,6 +5245,10 @@ mod dip46_tests;
 #[cfg(test)]
 #[path = "dip47_tests.rs"]
 mod dip47_tests;
+// dip48 (11-12): the follower-flow log (psflow48.rs); off by default = dip47
+#[cfg(test)]
+#[path = "dip48_tests.rs"]
+mod dip48_tests;
 
 // dip45 (11-11 PKT): the FLEET SIGNAL shadow (ps45_fleet.rs; LOG ONLY, off by default = dip43g)
 #[cfg(test)]

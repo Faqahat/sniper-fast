@@ -27,7 +27,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-pub const KEYS: [&str; 21] = ["rearm_fleet", "rearm_fleet_spec", "rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
+pub const KEYS: [&str; 23] = ["fresh_skip", "fresh_skip_spec", "rearm_fleet", "rearm_fleet_spec", "rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
     "min_age_slots", "exit_ms", "tp", "sl", "grp_t2", "grp_t2_pct", "grp_t2_whale"];
 
 /// the new keys' values (Copy; the start value of each = its flag)
@@ -63,7 +63,23 @@ pub struct Vals {
     /// the re-arm fleet rule's spec (None: the flag not given: the keys are ignored) and mode
     pub rf: Option<(u32, u64)>,
     pub rf_live: bool,
+    /// dip48 fresh-holders skip: (T2 %, re-arm %; 0 = off for the lane), live; None = the flag not given (the keys are ignored)
+    pub fresh: Option<(f64, f64)>,
+    pub fresh_live: bool,
 }
+
+/// "T2:RA" (each 0 = off, or 5..90 % of supply)
+pub fn fresh_parse(s: &str) -> std::result::Result<(f64, f64), String> {
+    let bad = || format!("'{s}': T2PCT:RAPCT (each 0 = off, or 5..90 % of supply), e.g. 35:20");
+    let (a, b) = s.split_once(':').ok_or_else(bad)?;
+    let (a, b): (f64, f64) = (a.trim().parse().map_err(|_| bad())?, b.trim().parse().map_err(|_| bad())?);
+    let ok = |x: f64| x == 0.0 || (5.0..=90.0).contains(&x);
+    if !ok(a) || !ok(b) || (a == 0.0 && b == 0.0) { return Err(bad()); }
+    Ok((a, b))
+}
+/// (fresh %, n, the lane's threshold, skip now)
+pub type Fr = (f64, usize, f64, bool);
+pub fn fresh_json(x: &Fr) -> serde_json::Value { serde_json::json!({"pct": x.0, "n": x.1, "thr": x.2, "would_skip": x.0 >= x.2}) }
 
 /// "HH:MM-HH:MM[,HH:MM-HH:MM]" (PKT, at most 4; "" = none)
 pub fn pause_parse(s: &str) -> std::result::Result<([(u16, u16); 4], u8), String> {
@@ -120,6 +136,8 @@ impl Vals {
             pause_now: false,
             rf: c.rearm_fleet,
             rf_live: c.rearm_fleet_live,
+            fresh: c.fresh_skip,
+            fresh_live: c.fresh_live,
         }
     }
     /// each key's value as the records show it
@@ -147,6 +165,8 @@ impl Vals {
             "pause_now" => (if self.pause_now { "on" } else { "off" }).into(),
             "rearm_fleet" => if self.rf.is_none() { "off".into() } else { (if self.rf_live { "live" } else { "log" }).into() },
             "rearm_fleet_spec" => self.rf.map_or(serde_json::Value::Null, |(n, k)| format!("{n}:{k}").into()),
+            "fresh_skip" => if self.fresh.is_none() { "off".into() } else { (if self.fresh_live { "live" } else { "log" }).into() },
+            "fresh_skip_spec" => self.fresh.map_or(serde_json::Value::Null, |(a, b)| format!("{a}:{b}").into()),
             _ => serde_json::Value::Null,
         }
     }
@@ -230,6 +250,14 @@ pub fn key_apply(k: &str, x: &serde_json::Value, start: &Vals, v: &mut Vals) -> 
             v.rearm_cap = f as u32;
         }
         "pause_window" => { (v.pause, v.pause_n) = pause_parse(text(x)?)?; }
+        "fresh_skip" => {
+            if start.fresh.is_none() { return Err("ignored: needs --presend-live-fresh-skip T2PCT:RAPCT at start".into()); }
+            v.fresh_live = match text(x)? { "log" => false, "live" => true, s => return Err(format!("'{s}' (log | live)")) };
+        }
+        "fresh_skip_spec" => {
+            if start.fresh.is_none() { return Err("ignored: needs --presend-live-fresh-skip T2PCT:RAPCT at start".into()); }
+            v.fresh = Some(fresh_parse(text(x)?)?);
+        }
         "rearm_fleet" => {
             if start.rf.is_none() { return Err("ignored: needs --presend-live-rearm-fleet N:SLOTS at start".into()); }
             v.rf_live = match text(x)? { "log" => false, "live" => true, s => return Err(format!("'{s}' (log | live)")) };
@@ -274,7 +302,7 @@ fn copy_key(k: &str, from: &Vals, to: &mut Vals) {
         "exit_ms" => to.exit_ms = from.exit_ms, "tp" => to.tp = from.tp, "sl" => to.sl = from.sl, "grp_t2" => to.grp_live = from.grp_live,
         "grp_t2_pct" => to.grp_pct = from.grp_pct, "grp_t2_whale" => to.grp_whale_in = from.grp_whale_in,
         "rearm_max_per_mint" => to.rearm_cap = from.rearm_cap, "pause_window" => { to.pause = from.pause; to.pause_n = from.pause_n; } "pause_now" => to.pause_now = from.pause_now,
-        "rearm_fleet" => to.rf_live = from.rf_live, "rearm_fleet_spec" => to.rf = from.rf, _ => {}
+        "rearm_fleet" => to.rf_live = from.rf_live, "fresh_skip" => to.fresh_live = from.fresh_live, "fresh_skip_spec" => to.fresh = from.fresh, "rearm_fleet_spec" => to.rf = from.rf, _ => {}
     }
 }
 
@@ -333,6 +361,8 @@ pub struct F47 {
     pub wq: VecDeque<u64>,
     pub px: BTreeMap<u64, (u64, f64, f64)>,
     pub grp_skips: u64,
+    /// dip48 fresh-holders skip: per armed window its verdict at the arm (the fill record's "fresh_skip"; only with the flag)
+    pub fresh_w: FxHashMap<u64, serde_json::Value>,
     /// re-arm FILLS per mint this run (the re-arm cap's count)
     pub rfills: FxHashMap<Pk, u32>,
     /// the pause under way (its text: "23:00-02:00" / "manual"), arms skipped in pauses, the test clock (UTC ns)
@@ -395,6 +425,16 @@ impl PsLive {
         self.f47.pause_cur += 1;
         *self.st.skips.entry("pause_window").or_default() += 1;
         true
+    }
+
+    /// dip48 the fresh-holders verdict of a lane (`rearm`) at its arm: None = the flag off / the lane off; .3 = skip now (live and >= thr)
+    pub(super) fn fresh48(&mut self, rearm: bool, pct: f64, n: usize) -> Option<Fr> {
+        let v = self.f47.cur?;
+        let (a, b) = v.fresh?;
+        let thr = if rearm { b } else { a };
+        if thr <= 0.0 { return None; }
+        if self.f47.fresh_w.len() > 8192 { self.f47.fresh_w.clear(); }
+        Some((pct, n, thr, v.fresh_live && pct >= thr))
     }
 
     fn v47(&self) -> Vals { self.f47.cur.unwrap_or_else(|| Vals::from_cfg(&self.cfg)) }
@@ -553,6 +593,8 @@ impl PsLive {
         put("grpsign_log", self.cfg.grpsign.into());
         put("fleet_log", self.cfg.fleet.is_some().into());
         put("funder_log", self.cfg.funder_log.into());
+        // dip48: only when on (off: dip47's state, its hash unchanged)
+        if self.cfg.flow_log { put("flow_log", true.into()); }
         // start-only settings that decide
         put("guard", self.cfg.g43.as_ref().map_or(off(), |g| serde_json::json!({"mode": if g.mode == ps43_guard::Mode::Holders { "holders" } else { "deadline" },
             "holders": format!("{}:{}:{}:{}", g.n, g.theta, g.max_leavers, g.min_pct), "ab": g.ab})));

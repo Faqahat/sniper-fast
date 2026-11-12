@@ -382,6 +382,17 @@ impl PsLive {
     #[allow(clippy::too_many_arguments)]
     fn rearm_arm(&mut self, mint: Pk, dump: RDump, holders: Vec<(Pk, i64)>, launch: Launch, chk_slot: u64, chk_t: u64, deferred: Option<(f64, &'static str)>,
                  r5: Option<serde_json::Value>, s1: Option<super::pss1::S1V>) {
+        // dip48 FRESH-HOLDERS skip (re-arm lane, LIVE): the same f3.fresh the arm record logs (the same slot: the re-arm clock), >= the lane's
+        // threshold -> the window is not armed (presend_live_skip "fresh_holders"); nothing without the flag / in log mode
+        if self.cfg.fresh_skip.is_some() && self.cfg.f3_log {
+            let slot = self.rm.as_ref().map_or(0, |r| r.clock);
+            let (fresh, fresh_n) = f3_fresh(&self.det, &mint, &self.user, &dump.tr.user, slot);
+            if let Some(x) = self.fresh48(true, fresh, fresh_n).filter(|x| x.3) {
+                let ex = serde_json::json!({"fresh": x.0, "fresh_n": x.1, "thr": x.2, "check_slot": chk_slot});
+                self.rearm_skip("fresh_holders", &mint, &dump, ex);
+                return;
+            }
+        }
         let (k, drop, dry) = (self.cfg.k, self.cfg.drop, self.cfg.dry);
         // the holders when a waiting window arms (the record's "holders" are the check's: the paper's)
         let holders_arm = deferred.map(|_| self.det.holders_at_least(&mint, RE_BIG, &self.user).unwrap_or_default());
@@ -434,6 +445,8 @@ impl PsLive {
         if self.cfg.f3_log {
             let (fresh, fresh_n) = f3_fresh(&self.det, &mint, &self.user, &dump.tr.user, arm_slot);
             r["f3"] = serde_json::json!({"fresh": fresh, "fresh_n": fresh_n});
+            // dip48 fresh-holders skip (log mode / below): its verdict on the arm record, kept for the fill record
+            if let Some(x) = self.fresh48(true, fresh, fresh_n) { let j = psctl47::fresh_json(&x); r["fresh_skip"] = j.clone(); self.f47.fresh_w.insert(id, j); }
             if let Some(g) = tags_json(&self.det, &mint, &self.cfg.tag_wallets) { r["tags"] = g; }
         }
         // dip37: the window's fee arm and its values (only with the A/B on); the ledger's view of the dumper (only with it on)

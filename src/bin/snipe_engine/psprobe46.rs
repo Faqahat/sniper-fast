@@ -39,8 +39,8 @@ pub const PROBE_MIN_OUT: u64 = u64::MAX;
 pub const PW0: u64 = 1 << 40;
 
 /// the probe kinds (bit i = KINDS[i]): arm-time skip reasons, then "s1" (any s1_* skip), "breaker" (opt-in only), then the send-time ones
-pub const KINDS: [&str; 19] = ["create_slot", "young_age", "quiet", "quiet3_a", "lone_whale", "cr_loss", "cr_unfollowed", "wh_loss", "holder_loss", "blocklist",
-    "m2_unseen", "mint_ledger", "fanout", "s1", "breaker", "fpnb", "skip2", "blocklist_send", "botdepth"];
+pub const KINDS: [&str; 20] = ["create_slot", "young_age", "quiet", "quiet3_a", "lone_whale", "cr_loss", "cr_unfollowed", "wh_loss", "holder_loss", "blocklist",
+    "m2_unseen", "mint_ledger", "fanout", "s1", "breaker", "fpnb", "skip2", "blocklist_send", "botdepth", "fresh_holders"];
 const K_BREAKER: u32 = 1 << 14;
 /// "all" = every kind but the breaker's pause
 pub const KINDS_ALL: u32 = ((1u32 << KINDS.len()) - 1) & !K_BREAKER;
@@ -55,6 +55,8 @@ pub fn kind_of(why: &str) -> Option<&'static str> {
         "blocklist_withheld" => Some("blocklist_send"),
         "botdepth_withheld" => Some("botdepth"),
         w if w.starts_with("s1_") => Some("s1"),
+        // dip48: the fresh-holders arm-time skip (its bit is the last one; arm-time)
+        "fresh_holders" => Some("fresh_holders"),
         w => KINDS[..15].iter().find(|k| **k == w && **k != "s1").copied(),
     }
 }

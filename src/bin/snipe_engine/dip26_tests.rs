@@ -1705,3 +1705,33 @@ fn dip47_rearm_fleet_rule() {
     assert!(gate(&c0.p.sh.rf, true, false, &FlSnap::default(), 1, 1).is_none());
     let _ = std::fs::remove_file(&ctl);
 }
+
+/// dip48 FRESH-HOLDERS skip, re-arm lane: B (8%, no hold on record) is fresh at the re-arm arm (the dumper A out): f3.fresh = 8%. Log at
+/// 5%: armed, the arm record's fresh_skip = its f3 (would_skip); live at 5%: skipped "fresh_holders" (kind rearm) with the same value; live
+/// at 10%: armed
+#[test]
+fn dip48_fresh_skip_rearm_lane() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let mut seen = Vec::new();
+    for (spec, mode) in [("0:5", "log"), ("0:5", "live"), ("0:10", "live")] {
+        let mut c = Ctx::new(&["--presend-live-rearm", "on", "--presend-live-f3-log", "on", "--presend-live-fresh-skip", spec, "--presend-live-fresh-skip-mode", mode]);
+        let (a, b, x) = ([0xA1u8; 32], [0xB1u8; 32], [0x33u8; 32]);
+        let mut tk = c.token(1, 1000, &[(a, 7.0), (b, 8.0)]);
+        let mut z = c.token(90, 1000, &[]);
+        for s in 1001..=1004 { let e = tk.buy(x, S / 10); c.tx(s, 5, vec![e], vec![]); }
+        let d = tk.sell_tok(a, pct(7.0));
+        c.tx(1005, 5, vec![d], vec![]);
+        clock(&mut c, &mut z, 1006, 1008);
+        let armed = c.p.armed.contains_key(&tk.mint);
+        let arm = c.ev("presend_live_arm").into_iter().find(|r| r["kind"] == "rearm");
+        let sk = c.ev("presend_live_skip").into_iter().find(|r| r["why"] == "fresh_holders");
+        seen.push((spec, mode, armed, arm.clone().map(|r| (r["f3"]["fresh"].clone(), r["fresh_skip"].clone())), sk.clone().map(|r| (r["kind"].clone(), r["fresh"].clone(), r["thr"].clone()))));
+        match (spec, mode) {
+            ("0:5", "log") => { let r = arm.unwrap(); assert!(armed); assert_eq!(r["fresh_skip"]["pct"], r["f3"]["fresh"]); assert_eq!(r["fresh_skip"]["would_skip"], true); assert!((r["f3"]["fresh"].as_f64().unwrap() - 8.0).abs() < 0.01); }
+            ("0:5", "live") => { assert!(!armed && arm.is_none()); let s = sk.unwrap(); assert_eq!((s["kind"].as_str(), s["thr"].as_f64()), (Some("rearm"), Some(5.0))); assert!((s["fresh"].as_f64().unwrap() - 8.0).abs() < 0.01); }
+            _ => { assert!(armed && sk.is_none()); assert_eq!(arm.unwrap()["fresh_skip"]["would_skip"], false); }
+        }
+    }
+    eprintln!("dip48 fresh re-arm lane: {seen:?}");
+}
