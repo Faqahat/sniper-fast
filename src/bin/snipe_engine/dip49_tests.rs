@@ -121,7 +121,7 @@ fn dip49_engine_path_and_worker() {
     assert!(!v.withhold(), "1 rival, dev age unknown (pending) = not young: sent");
     // the worker answers: the creator's oldest tx 0.5 h before the create -> young -> 1 rival withheld
     let src = |m: &str, pv: serde_json::Value| -> std::result::Result<serde_json::Value, String> {
-        assert_eq!((m, pv[1]["limit"].as_u64(), pv[1]["before"].as_str()), ("getSignaturesForAddress", Some(1000), Some(bs58::encode(&[0xC7u8; 64]).into_string().as_str())));
+        assert_eq!((m, pv[1]["limit"].as_u64(), pv[1].get("before")), ("getSignaturesForAddress", Some(1000), None), "dip49b: no `before`");
         // newest first (the RPC's order): the oldest is the last
         Ok(serde_json::json!([{"signature": "y", "blockTime": 1_799_998_200u64}, {"signature": "x", "blockTime": 1_799_996_400u64}]))
     };
@@ -143,8 +143,8 @@ fn dip49_engine_path_and_worker() {
     let cap = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Ok(serde_json::Value::Array(vec![serde_json::json!({"blockTime": 1}); 1000])) };
     let err = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Err("-32020 history not available".into()) };
     let none = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Ok(serde_json::json!([])) };
-    let j = DJob { creator: [1u8; 32], sig: [2u8; 64], t: 100.0 };
-    assert_eq!((dev_lookup(&cap, &j), dev_lookup(&err, &j), dev_lookup(&none, &j)), (Dev::Capped, Dev::Err, Dev::Oldest(100.0)));
+    let j = DJob { creator: [1u8; 32], sig: [2u8; 64], t: 100.0, tries: 0, due: None };
+    assert_eq!((dev_lookup(&cap, &j).0, dev_lookup(&err, &j), dev_lookup(&none, &j).0), (Dev::Capped, (Dev::Err, Some("-32020 history not available".to_string())), Dev::Err));
     // the fill record carries the filling try's verdict; the realized record the compact one
     let _ = orx.try_iter().count();
     let mut sig = [0x49u8; 64]; sig[1] = 50;
@@ -226,4 +226,73 @@ fn dip49_ra_def_and_flags() {
     }
     let c = cfg(&["--presend-live-rival-gate", "0:2:1"]).unwrap().unwrap();
     assert_eq!((c.rival_gate, c.rival_live, c.rival_slots), (Some((0, 2, 1.0)), false, 20));
+}
+
+/// dip49b: an indexing-lag answer (an error, then an empty list) is retried (1 / 3 / 8 s; scaled to 0 here) and the success is kept; a lookup
+/// that keeps failing ends as "error" with its text recorded (presend_live_devage + a line), and the T2 trigger asks once more
+#[test]
+fn dip49b_retry_and_error_text() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut p, _a, orx) = PsLive::for_test(cfg(&["--presend-live-rival-gate", "0:2:1"]).unwrap().unwrap(), USER);
+    let calls = std::cell::Cell::new(0u32);
+    let lag = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> {
+        calls.set(calls.get() + 1);
+        match calls.get() { 1 => Err("Transaction history is not available (-32020)".into()), 2 => Ok(serde_json::json!([])),
+            _ => Ok(serde_json::json!([{"signature": "c", "blockTime": 1_000u64}, {"signature": "b", "blockTime": 600u64}])) }
+    };
+    let r = p.rg49.as_mut().unwrap();
+    r.create([0x11u8; 32], [0x22u8; 32], [3u8; 64], 1_000.0 + 1800.0);
+    r.pump(&lag);
+    assert_eq!(calls.get(), 3, "two failures retried, the third answer kept");
+    assert_eq!(r.dsh.retries.load(Ordering::Relaxed), 2);
+    p.rg49_drain();
+    let r = p.rg49.as_ref().unwrap();
+    assert_eq!(r.age(&[0x11u8; 32]), (((2800.0 - 600.0) / 3600.0) as f32, 1));
+    // always failing: 1 + 3 retries, then "error" with its text; the T2 trigger asks once more (once)
+    let bad = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Err("429 Too Many Requests https://x.example/?api-key=SECRET".into()) };
+    let r = p.rg49.as_mut().unwrap();
+    r.create([0x12u8; 32], [0x23u8; 32], [4u8; 64], 5_000.0);
+    let c0 = r.dsh.calls.load(Ordering::Relaxed);
+    r.pump(&bad);
+    assert_eq!(r.dsh.calls.load(Ordering::Relaxed) - c0, 1 + RETRY_S.len() as u64);
+    let _ = orx.try_iter().count();
+    p.rg49_drain();
+    let recs: Vec<serde_json::Value> = orx.try_iter().filter_map(|o| o.rec()).collect();
+    let e = recs.iter().find(|x| x["ev"] == "presend_live_devage").unwrap_or_else(|| panic!("{recs:?}"));
+    let txt = e["dev_age_err"].as_str().unwrap();
+    assert!(txt.contains("429") && !txt.contains("SECRET"), "rpc-scrubbed: {txt}");
+    let r = p.rg49.as_mut().unwrap();
+    assert_eq!(r.age(&[0x12u8; 32]).1, 3);
+    r.trigger(&[0x12u8; 32]);
+    assert_eq!(r.dsh.q.lock().unwrap().len(), 1, "one more at the trigger");
+    r.pump(&lag);
+    r.trigger(&[0x12u8; 32]);
+    assert!(r.dsh.q.lock().unwrap().is_empty(), "only once");
+    // the summary record carries the window's error text
+    let sh = ShRg::default();
+    Rg49::note_err(&sh, 7, "boom");
+    let (otx, orx2) = crossbeam_channel::unbounded::<Out>();
+    let mut srg = SendRg::default();
+    srg.note(7, [1u8; 32], &RgV { rivals: 1, age_h: f32::NAN, young: false, live: true, would: false, open: None, src: 3 }, 0);
+    srg.flush_e(&otx, 10_000_000_000, true, Some(&sh));
+    let o: Vec<serde_json::Value> = orx2.try_iter().filter_map(|o| o.rec()).collect();
+    assert_eq!(o[0]["dev_age_err"], "boom");
+    // the RPC flag
+    assert!(cfg(&["--presend-live-devage-rpc", "http://x"]).is_err(), "needs the gate");
+    assert_eq!(cfg(&["--presend-live-rival-gate", "0:2:1", "--presend-live-devage-rpc", "https://h/?api-key=${HELIUS_API_KEY}"]).unwrap().unwrap().devage_rpc.as_deref(), Some("https://h/?api-key=${HELIUS_API_KEY}"));
+}
+
+/// dip49b offline: 9Ye53E65's creator C6XLWkbj (rugdet launch_all / funder_cache: 9 signatures, the oldest at blockTime 1794443385; the create
+/// at 1794446703, launch_bt) through the engine's lookup -> 0.92 h = rugdet's dev_age_h; young under AGE_H 1
+#[test]
+fn dip49b_9ye53_dev_age_offline() {
+    let first_bt = 1_794_443_385u64; let cbt = 1_794_446_703.0f64;
+    let sigs: Vec<serde_json::Value> = (0..9u64).map(|k| serde_json::json!({"signature": format!("s{k}"), "blockTime": if k == 8 { first_bt } else { 1_794_446_703 - k * 100 }})).collect();
+    let src = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Ok(serde_json::Value::Array(sigs.clone())) };
+    let j = DJob { creator: pk("C6XLWkbjDcbACo6xuaXqReq52b7AqAhngP673NuxA6dH"), sig: [0u8; 64], t: cbt, tries: 0, due: None };
+    let (d, e) = dev_lookup(&src, &j);
+    let Dev::Oldest(bt) = d else { panic!("{d:?} {e:?}") };
+    let age = (cbt - bt) / 3600.0;
+    eprintln!("dip49b 9Ye53E65 dev age {age:.4} h (rugdet 0.92)");
+    assert!((age - 0.9217).abs() < 0.001);
 }

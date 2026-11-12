@@ -69,3 +69,26 @@ the try is WITHHELD (`dip49_9ye53_withheld`).
   f1_pct / f1_n exactly.
 * **Caveat.** rugdet computed f1 from the FILL annotation, i.e. at our landing. The engine has to decide at the re-arm ARM, so it computes
   f1 on the arm-time state. The replay's +1.46 / +1.67 is landing-time; the arm-time value can differ.
+
+## dip49b: dev-age lookup fix (r87: 900 of 900 lookups were "error")
+
+* **Cause.** dip49 asked `getSignaturesForAddress(creator, {before: <create sig>})` AT the create. The brand-new signature is not
+  indexed yet at that moment, so every call failed.
+* **Fix.** The call is now `getSignaturesForAddress(creator, {limit: 1000})` with no `before`.
+  * 1000 results = capped = old.
+  * Otherwise the age uses the OLDEST entry: `create time − its blockTime`, at least 0. If the create is the oldest entry, or the list has
+    only txs at or after the create, the age is about 0 (brand new).
+  * An empty list (not indexed yet), a missing blockTime, or an RPC error is retried after 1 s, 3 s and 8 s. The job is queued again with a
+    due time, so the worker never sleeps on it.
+  * After that the age is "error" (unknown, so not young). A T2 trigger on the mint asks once more (once per creator).
+* **Error text.** It is rpc-scrubbed and recorded:
+  * `presend_live_devage {creator, ok: false, dev_age_err}` plus a line `PRESEND LIVE DEV AGE error …`, once per failed creator;
+  * `dev_age_err` on the window's `presend_live_rival_gate` summary, and on its line.
+* **RPC.** `--presend-live-devage-rpc URL` (`${VAR}` expanded). The default is the funder / FAM RPC setting, then rpc_url. The URL is never
+  printed or recorded. The engine loads `/root/sniper/deploy/.env` (or `--env-file`) at start, so
+  `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}` expands.
+* **Tests.**
+  * `dip49b_retry_and_error_text`: a mock RPC returns an indexing-lag error, then an empty list, then success; the success is kept. A
+    lookup that always fails ends with its scrubbed text recorded. The T2 trigger's extra try happens once.
+  * `dip49b_9ye53_dev_age_offline`: the creator C6XLWkbj's cached history (oldest blockTime 1794443385, create 1794446703) gives
+    0.9217 h, which is rugdet's 0.92.

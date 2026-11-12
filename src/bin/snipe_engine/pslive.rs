@@ -284,7 +284,8 @@ pub mod psflow48;
 // dip49: the T2 RIVAL GATE (per try; log / live) and the re-arm fresh-holders f1 definition
 #[path = "psrival49.rs"]
 pub mod psrival49;
-const D49FLAGS: [&str; 4] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def"];
+const D49FLAGS: [&str; 5] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def",
+    "--presend-live-devage-rpc"];
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -611,6 +612,8 @@ pub struct Cfg {
     pub rival_live: bool,
     pub rival_slots: u64,
     pub fresh_ra_f1: bool,
+    /// dip49b --presend-live-devage-rpc URL (None: the funder log's setting); never printed
+    pub devage_rpc: Option<String>,
 }
 
 /// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
@@ -813,6 +816,7 @@ impl Cfg {
             rival_gate: match arg(psrival49::FLAG) { None => None, Some(v) => Some(psrival49::spec_parse(&v).map_err(|e| anyhow::anyhow!("{} {e}", psrival49::FLAG))?) },
             rival_live: match arg(psrival49::FLAG_MODE).as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("{} {x}: log | live", psrival49::FLAG_MODE) },
             rival_slots: match arg(psrival49::FLAG_SLOTS) { None => 20, Some(v) => v.parse::<u64>().ok().filter(|n| (1..=60).contains(n)).with_context(|| format!("{} {v}: slots 1..60", psrival49::FLAG_SLOTS))? },
+            devage_rpc: arg(psrival49::FLAG_RPC).filter(|u| !u.starts_with("--")),
             fresh_ra_f1: match arg(psrival49::FLAG_RADEF).as_deref() { None | Some("f3") => false, Some("f1") => true, Some(x) => bail!("{} {x}: f1 | f3", psrival49::FLAG_RADEF) },
             fresh_live: match arg("--presend-live-fresh-skip-mode").as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("--presend-live-fresh-skip-mode {x}: log | live") },
             funder_rpc: arg("--presend-live-funder-rpc").filter(|u| !u.starts_with("--")),
@@ -821,7 +825,8 @@ impl Cfg {
             limits47: serde_json::json!({"max_sol": arg("--max-sol"), "kill_switch_sol": arg("--max-loss-sol"), "profit_lock": {"min_sol": arg("--profit-lock-min-sol"), "frac": arg("--profit-lock-frac")}}),
         };
         // dip47: the hold clocks it reads are kept only with the annotations on
-        if c.rival_gate.is_none() { if let Some(f) = [psrival49::FLAG_MODE, psrival49::FLAG_SLOTS].iter().find(|f| has(f)) { bail!("{f} needs {} R0:R2:AGE_H", psrival49::FLAG); } }
+        if has(psrival49::FLAG_RPC) && c.devage_rpc.is_none() { bail!("{} needs a URL (${{VAR}} expanded)", psrival49::FLAG_RPC); }
+        if c.rival_gate.is_none() { if let Some(f) = [psrival49::FLAG_MODE, psrival49::FLAG_SLOTS, psrival49::FLAG_RPC].iter().find(|f| has(f)) { bail!("{f} needs {} R0:R2:AGE_H", psrival49::FLAG); } }
         if has(psrival49::FLAG_RADEF) && c.fresh_skip.is_none() { bail!("{} needs --presend-live-fresh-skip T2PCT:RAPCT", psrival49::FLAG_RADEF); }
         if has("--presend-live-fresh-skip-mode") && c.fresh_skip.is_none() { bail!("--presend-live-fresh-skip-mode needs --presend-live-fresh-skip T2PCT:RAPCT"); }
         if c.fresh_skip.is_some() && !c.f3_log { bail!("--presend-live-fresh-skip needs --presend-live-f3-log (the fresh-holders metric it acts on is computed there)"); }
@@ -1461,7 +1466,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
         if sh.stop.load(Ordering::Relaxed) && sh.wins.lock().unwrap().is_empty() { break; }
         psctl47::sender_sync(&sh.f47, &mut f47v, &mut sc.cfg);
         srf.flush(&out, arbx::fast::mono_ns(), false);
-        srg.flush(&out, arbx::fast::mono_ns(), false);
+        srg.flush_e(&out, arbx::fast::mono_ns(), false, Some(&sh.rg));
         let now = arbx::fast::mono_ns();
         let slot = sh.cur_slot();
         let mut due: Vec<SWin> = Vec::new();
@@ -2870,8 +2875,10 @@ impl PsLive {
         if p.cfg.flow_log { p.fl48 = Some(psflow48::Flow48::new(&p.cfg.tag_wallets)); }
         // dip49 RIVAL GATE: the feed's fail tap and the dev-age workers (the funder log's RPC setting; never printed)
         if p.cfg.rival_gate.is_some() {
-            let url = match p.cfg.funder_rpc.as_ref().or(p.cfg.fam_rpc.as_ref()) { Some(u) => config::expand(u), None => PRIMARY_URL.get().cloned() };
-            if url.is_none() { eprintln!("DIP49 RIVAL GATE: no RPC for the dev-age lookups: every dev age is UNKNOWN (only rivals <= R0 can block)"); }
+            let url = match p.cfg.devage_rpc.as_ref().or(p.cfg.funder_rpc.as_ref()).or(p.cfg.fam_rpc.as_ref()) { Some(u) => config::expand(u), None => PRIMARY_URL.get().cloned() };
+            let src = if p.cfg.devage_rpc.is_some() { psrival49::FLAG_RPC } else if p.cfg.funder_rpc.is_some() { "--presend-live-funder-rpc" } else if p.cfg.fam_rpc.is_some() { "--presend-live-fam-rpc" } else { "rpc_url" };
+            if url.is_none() { eprintln!("DIP49 RIVAL GATE: no RPC for the dev-age lookups ({src} empty / its variable missing): every dev age is UNKNOWN (only rivals <= R0 can block)"); }
+            else { eprintln!("DIP49 RIVAL GATE: dev-age lookups on {src} (getSignaturesForAddress(creator, limit 1000), retries after 1 / 3 / 8 s, one more at the T2 trigger)"); }
             p.rg49 = psrival49::Rg49::start(url, p.cfg.funder_rps);
             eprintln!("DIP49 RIVAL GATE ({}): T2 tries withheld when rivals <= R0 or (rivals <= R2 and dev age < AGE_H h), {:?}, rivals in the last {} slots", if p.cfg.rival_live { "LIVE" } else { "log" }, p.cfg.rival_gate.unwrap(), p.cfg.rival_slots);
         }
@@ -3564,6 +3571,8 @@ impl PsLive {
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
             spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
             grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint), p46: None, rfl: Default::default(), rg: self.rg49_snap(&t.mint, wide.is_none()) };
+        // dip49b: a failed dev-age lookup: one more at the trigger; its error text for the window's summary (nothing with the gate off)
+        if wide.is_none() { if let Some(r) = self.rg49.as_mut() { r.trigger(&t.mint); if let Some(e) = r.err_of(&t.mint) { psrival49::Rg49::note_err(&self.sh.rg, id, e); } } }
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.f47_arm(id);

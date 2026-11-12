@@ -32,6 +32,10 @@ pub const FLAG: &str = "--presend-live-rival-gate";
 pub const FLAG_MODE: &str = "--presend-live-rival-gate-mode";
 pub const FLAG_SLOTS: &str = "--presend-live-rival-gate-slots";
 pub const FLAG_RADEF: &str = "--presend-live-fresh-skip-ra-def";
+/// dip49b: the dev-age lookups' own RPC (`${VAR}` expanded from the env / .env; default: the funder log's setting; never printed)
+pub const FLAG_RPC: &str = "--presend-live-devage-rpc";
+/// dip49b: a failed lookup is asked again after these waits (then the age stays unknown; one more try at the T2 trigger)
+pub const RETRY_S: [u64; 3] = [1, 3, 8];
 pub const STALE_NS: u64 = 60 * 1_000_000_000;
 pub const NPAY: usize = 16;
 const TIMEOUT: Duration = Duration::from_secs(8);
@@ -88,6 +92,8 @@ pub struct ShRg {
     pub blind: AtomicBool,
     /// [passed, withheld, would, open]
     pub n: [AtomicU64; 4],
+    /// dip49b: per window the dev-age lookup's error text (the summary record's dev_age_err; read at the flush only)
+    pub errs: Mutex<FxHashMap<u64, String>>,
 }
 impl ShRg {
     pub fn set(&self, spec: Option<(u32, u32, f64)>, slots: u64, live: bool) {
@@ -140,7 +146,8 @@ impl SendRg {
         e.1[i] += 1; e.2 = e.2.min(v.rivals); e.4 = now; e.5 = v.live; e.6 = v.age_h; e.7 = v.src;
         if let Some(o) = v.open { e.3 = o; }
     }
-    pub fn flush(&mut self, out: &crossbeam_channel::Sender<Out>, now: u64, all: bool) {
+    pub fn flush(&mut self, out: &crossbeam_channel::Sender<Out>, now: u64, all: bool) { self.flush_e(out, now, all, None) }
+    pub fn flush_e(&mut self, out: &crossbeam_channel::Sender<Out>, now: u64, all: bool, sh: Option<&ShRg>) {
         if self.w.is_empty() || (!all && now < self.at + 1_000_000_000) { return; }
         self.at = now;
         let done: Vec<u64> = self.w.iter().filter(|(_, e)| all || now > e.4 + 2_000_000_000).map(|(k, _)| *k).collect();
@@ -152,10 +159,12 @@ impl SendRg {
                 "withheld": c[1], "would": c[2], "open": c[3], "rivals_min": if rmin == u32::MAX { 0 } else { rmin }, "dev_age_h": ah, "dev_age_src": SRC[src as usize],
                 "t": arbx::feeds::clock::now_ns()});
             if !open.is_empty() { r["open_why"] = open.into(); }
+            let err = sh.and_then(|s| s.errs.lock().unwrap().remove(&k));
+            if let Some(e) = &err { r["dev_age_err"] = e.clone().into(); }
             let _ = out.send(Out::Rec(r));
             let _ = out.send(Out::Line(format!("  PRESEND LIVE RIVAL GATE ({mode}) w{k} {}: tries {} | passed {} | withheld {} | would {} | open {}{} | rivals min {} | dev age {}", b58(&mint),
                 c.iter().sum::<u32>(), c[0], c[1], c[2], c[3], if open.is_empty() { String::new() } else { format!(" ({open})") }, if rmin == u32::MAX { 0 } else { rmin },
-                if age.is_finite() { format!("{age:.2} h") } else { SRC[src as usize].to_string() })));
+                if age.is_finite() { format!("{age:.2} h") } else { SRC[src as usize].to_string() }) + &err.map(|e| format!(" ({e})")).unwrap_or_default()));
         }
     }
 }
@@ -166,33 +175,55 @@ impl SendRg {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Dev { Oldest(f64), Capped, Err }
 #[derive(Clone, Debug)]
-pub struct DJob { pub creator: Pk, pub sig: [u8; 64], pub t: f64 }
+pub struct DJob { pub creator: Pk, pub sig: [u8; 64], pub t: f64, pub tries: u8, pub due: Option<Instant> }
 pub type Src<'a> = dyn Fn(&str, serde_json::Value) -> std::result::Result<serde_json::Value, String> + 'a;
 
-/// one lookup (s14_devcombo.py: capped at 1000 = old; none before the create = age 0)
-pub fn dev_lookup(src: &Src, j: &DJob) -> Dev {
-    let p = serde_json::json!([b58(&j.creator), {"before": bs58::encode(&j.sig).into_string(), "limit": 1000, "commitment": "confirmed"}]);
+/// one lookup -> (the answer, the error text (rpc-scrubbed) when it failed). dip49b: NO `before` (dip49's `before: <create sig>` failed on
+/// every lookup in r87: the brand-new signature is not indexed yet at the create); the creator's newest 1000 signatures: 1000 = capped =
+/// old; else the OLDEST entry's blockTime (the newest-first list's last; txs after the create only push nothing older) -> age = create time -
+/// that, >= 0 (the create itself the oldest / only txs at or after the create: ~0 = brand new); an empty list (not indexed yet) or a
+/// missing blockTime = an error (retried)
+pub fn dev_lookup(src: &Src, j: &DJob) -> (Dev, Option<String>) {
+    let p = serde_json::json!([b58(&j.creator), {"limit": 1000, "commitment": "confirmed"}]);
     match src("getSignaturesForAddress", p) {
         Ok(v) => match v.as_array() {
-            Some(a) if a.len() >= 1000 => Dev::Capped,
-            Some(a) if a.is_empty() => Dev::Oldest(j.t),
-            Some(a) => a.last().and_then(|x| x["blockTime"].as_f64()).map_or(Dev::Err, Dev::Oldest),
-            None => Dev::Err,
+            Some(a) if a.len() >= 1000 => (Dev::Capped, None),
+            Some(a) if a.is_empty() => (Dev::Err, Some("empty signature list (not indexed yet)".into())),
+            Some(a) => match a.last().and_then(|x| x["blockTime"].as_f64()) {
+                Some(bt) => (Dev::Oldest(bt.min(j.t)), None),
+                None => (Dev::Err, Some("no blockTime on the oldest signature".into())),
+            },
+            None => (Dev::Err, Some(format!("not a list: {}", v.to_string().chars().take(120).collect::<String>()))),
         },
-        Err(_) => Dev::Err,
+        Err(e) => (Dev::Err, Some(rpc::scrub(&e).chars().take(200).collect())),
     }
 }
 
 #[derive(Default)]
-pub struct DevSh { pub q: Mutex<VecDeque<DJob>>, pub stop: AtomicBool, pub calls: AtomicU64, pub errs: AtomicU64, pub drops: AtomicU64, next: Mutex<Option<Instant>> }
-pub fn dev_work(sh: &DevSh, src: &Src, gap: Duration, tx: &crossbeam_channel::Sender<(Pk, Dev)>) -> bool {
-    let Some(j) = sh.q.lock().unwrap().pop_front() else { return false };
+pub struct DevSh { pub q: Mutex<VecDeque<DJob>>, pub stop: AtomicBool, pub calls: AtomicU64, pub errs: AtomicU64, pub drops: AtomicU64, pub retries: AtomicU64, next: Mutex<Option<Instant>> }
+/// one due job (a job not due yet goes to the back): looked up; a failure is queued again after RETRY_S (its last error sent only when
+/// the retries are spent). `retry_scale`: the tests' 0 (no wait). -> false: nothing due
+pub fn dev_work(sh: &DevSh, src: &Src, gap: Duration, tx: &crossbeam_channel::Sender<(Pk, Dev, Option<String>)>, retry_scale: f64) -> bool {
+    let j = {
+        let mut q = sh.q.lock().unwrap();
+        let now = Instant::now();
+        let Some(i) = q.iter().position(|j| j.due.is_none_or(|d| d <= now)) else { return false };
+        q.remove(i).unwrap()
+    };
     let wait = { let mut n = sh.next.lock().unwrap(); let now = Instant::now(); let at = n.map_or(now, |x| x.max(now)); *n = Some(at + gap); at - now };
     if !wait.is_zero() { std::thread::sleep(wait); }
     sh.calls.fetch_add(1, Ordering::Relaxed);
-    let d = dev_lookup(src, &j);
-    if d == Dev::Err { sh.errs.fetch_add(1, Ordering::Relaxed); }
-    let _ = tx.send((j.creator, d));
+    let (d, err) = dev_lookup(src, &j);
+    if d == Dev::Err {
+        sh.errs.fetch_add(1, Ordering::Relaxed);
+        if (j.tries as usize) < RETRY_S.len() {
+            let w = Duration::from_secs_f64(RETRY_S[j.tries as usize] as f64 * retry_scale);
+            sh.retries.fetch_add(1, Ordering::Relaxed);
+            sh.q.lock().unwrap().push_back(DJob { tries: j.tries + 1, due: Some(Instant::now() + w), ..j });
+            return true;
+        }
+    }
+    let _ = tx.send((j.creator, d, err));
     true
 }
 
@@ -204,10 +235,15 @@ pub struct Rg49 {
     pub creates: FxHashMap<Pk, (Pk, f64)>,
     creates_q: VecDeque<Pk>,
     pub dev: FxHashMap<Pk, Dev>,
+    /// dip49b: per creator its lookup's last error (rpc-scrubbed) and whether the T2 trigger's extra try was made
+    pub dev_err: FxHashMap<Pk, String>,
+    pub trig_retry: FxHashSet<Pk>,
     pending: FxHashSet<Pk>,
+    /// per creator the create it was asked for (the T2 trigger's extra try)
+    pub create_sig: FxHashMap<Pk, ([u8; 64], f64)>,
     pub dsh: Arc<DevSh>,
-    drx: crossbeam_channel::Receiver<(Pk, Dev)>,
-    dtx: crossbeam_channel::Sender<(Pk, Dev)>,
+    drx: crossbeam_channel::Receiver<(Pk, Dev, Option<String>)>,
+    dtx: crossbeam_channel::Sender<(Pk, Dev, Option<String>)>,
     /// per window its fill's verdict (the realized record's)
     pub done: FxHashMap<u64, serde_json::Value>,
     pub n_fails: u64, pub n_matched: u64,
@@ -217,7 +253,8 @@ const DEV_CACHE: usize = 100_000;
 impl Rg49 {
     fn base(fails: crossbeam_channel::Receiver<arbx::feeds::RivalFail>, test_tx: Option<crossbeam_channel::Sender<arbx::feeds::RivalFail>>) -> Rg49 {
         let (dtx, drx) = crossbeam_channel::unbounded();
-        Rg49 { fails, test_tx, mints: FxHashMap::default(), creates: FxHashMap::default(), creates_q: VecDeque::new(), dev: FxHashMap::default(), pending: FxHashSet::default(),
+        Rg49 { fails, test_tx, mints: FxHashMap::default(), creates: FxHashMap::default(), creates_q: VecDeque::new(), dev: FxHashMap::default(), dev_err: FxHashMap::default(),
+            trig_retry: FxHashSet::default(), create_sig: FxHashMap::default(), pending: FxHashSet::default(),
             dsh: Arc::new(DevSh::default()), drx, dtx, done: FxHashMap::default(), n_fails: 0, n_matched: 0 }
     }
     /// the tests: a private fail channel, no workers
@@ -235,23 +272,38 @@ impl Rg49 {
                     let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
                     let client = rpc::Rpc::race(vec![rpc::Endpoint { name: "devage".into(), url, bearer: None }]);
                     let src = move |m: &str, p: serde_json::Value| rt.block_on(client.call_bounded(m, p, rpc::Bounds::fetch(TIMEOUT, 0))).map(|f| f.value).map_err(|e| rpc::scrub(&e.msg));
-                    while !sh.stop.load(Ordering::Relaxed) { if !dev_work(&sh, &src, gap, &tx) { std::thread::sleep(Duration::from_millis(5)); } }
+                    while !sh.stop.load(Ordering::Relaxed) { if !dev_work(&sh, &src, gap, &tx, 1.0) { std::thread::sleep(Duration::from_millis(5)); } }
                 });
             }
         }
         Some(r)
     }
-    pub fn pump(&mut self, src: &Src) { while dev_work(&self.dsh, src, Duration::ZERO, &self.dtx) {} }
+    pub fn pump(&mut self, src: &Src) { while dev_work(&self.dsh, src, Duration::ZERO, &self.dtx, 0.0) {} }
     /// a create of a followed token: its creator's age looked up once (queued; never waited for)
     pub fn create(&mut self, mint: Pk, creator: Pk, sig: [u8; 64], t: f64) {
         self.creates.insert(mint, (creator, t));
         self.creates_q.push_back(mint);
         while self.creates_q.len() > 200_000 { if let Some(o) = self.creates_q.pop_front() { self.creates.remove(&o); self.mints.remove(&o); } }
+        if self.create_sig.len() > 200_000 { self.create_sig.clear(); }
+        self.create_sig.insert(creator, (sig, t));
         if self.dev.contains_key(&creator) || !self.pending.insert(creator) { return; }
+        self.queue(DJob { creator, sig, t, tries: 0, due: None });
+    }
+    fn queue(&mut self, j: DJob) {
         let mut q = self.dsh.q.lock().unwrap();
         if q.len() >= DEV_Q { if let Some(o) = q.pop_front() { self.pending.remove(&o.creator); } self.dsh.drops.fetch_add(1, Ordering::Relaxed); }
-        q.push_back(DJob { creator, sig, t });
+        q.push_back(j);
     }
+    /// dip49b: at a T2 trigger: a creator whose lookup FAILED gets one more lookup (once)
+    pub fn trigger(&mut self, mint: &Pk) {
+        let Some((c, t)) = self.creates.get(mint).copied() else { return };
+        if self.dev.get(&c) != Some(&Dev::Err) || !self.trig_retry.insert(c) || !self.pending.insert(c) { return; }
+        let sig = self.create_sig.get(&c).map_or([0u8; 64], |x| x.0);
+        self.dev.remove(&c);
+        self.queue(DJob { creator: c, sig, t, tries: RETRY_S.len() as u8, due: None });
+    }
+    /// the creator's last lookup error of a mint
+    pub fn err_of(&self, mint: &Pk) -> Option<&String> { self.creates.get(mint).and_then(|(c, _)| self.dev_err.get(c)) }
     /// a mint's dev age (h) and its source
     pub fn age(&self, mint: &Pk) -> (f32, u8) {
         let Some((c, t)) = self.creates.get(mint) else { return (f32::NAN, 0) };
@@ -262,6 +314,8 @@ impl Rg49 {
             None => (f32::NAN, if self.pending.contains(c) { 4 } else { 0 }),
         }
     }
+    /// dip49b: the sender's summary's error text per window (set at the T2 arm / when a lookup fails)
+    pub fn note_err(sh: &ShRg, w: u64, e: &str) { let mut g = sh.errs.lock().unwrap(); if g.len() > 4096 { g.clear(); } g.insert(w, e.to_string()); }
     /// the mint's copy for a window (`on`: a T2 window with the rule configured)
     pub fn snap(&self, mint: &Pk, on: bool) -> RgSnap {
         let mut s = self.mints.get(mint).copied().unwrap_or_default();
@@ -300,11 +354,19 @@ impl PsLive {
         }
         if any { self.sh.rg.last_fail.store(arbx::fast::mono_ns().max(1), Ordering::Relaxed); }
         let r = self.rg49.as_mut().unwrap();
-        while let Ok((c, d)) = r.drx.try_recv() {
+        let mut errs: Vec<(Pk, String)> = Vec::new();
+        while let Ok((c, d, e)) = r.drx.try_recv() {
             r.pending.remove(&c);
             r.dev.insert(c, d);
+            match e { Some(e) => { r.dev_err.insert(c, e.clone()); errs.push((c, e)); } None => { r.dev_err.remove(&c); } }
+            if r.dev_err.len() > DEV_CACHE { r.dev_err.clear(); }
             if r.dev.len() > DEV_CACHE { r.dev.clear(); }
             for (m, (cr, _)) in r.creates.iter() { if *cr == c && self.armed.contains_key(m) { touched.push(*m); } }
+        }
+        // dip49b: a lookup that failed for good (retries spent): its error, recorded once per creator
+        for (c, e) in errs {
+            self.rec(serde_json::json!({"ev": "presend_live_devage", "creator": b58(&c), "ok": false, "dev_age_err": e, "t": arbx::feeds::clock::now_ns()}));
+            self.line(format!("  PRESEND LIVE DEV AGE error {}: {e}", &b58(&c)[..8]));
         }
         if touched.is_empty() || !self.rg_on() { return; }
         touched.sort(); touched.dedup();
