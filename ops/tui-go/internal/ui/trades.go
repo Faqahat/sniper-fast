@@ -600,13 +600,16 @@ func (m *Model) scrTrades(w, bh int) string {
 		lbl := map[int]string{1: "filter skips", 2: "all skips"}[m.skipsMode]
 		left += t.Warn.Render("  + "+lbl) + t.Lbl.Render(fmt.Sprintf(" %d", nsk))
 		if st.NoFill > 0 {
-			left += t.Lbl.Render(fmt.Sprintf("  no fill %d", st.NoFill))
+			left += t.Lbl.Render(fmt.Sprintf("  no dip %d", st.NoFill))
 		}
 		if st.Scored > 0 {
 			left += t.Lbl.Render(fmt.Sprintf("  paper %dW/%dL ", st.WinN, st.LoseN)) + t.Money(int64(st.Paper*core.LAM), true, false).Render(core.FS(st.Paper, 3))
 			if st.CalN > 0 {
 				left += t.Lbl.Render(" cal ") + t.Money(int64(st.Cal*core.LAM), true, false).Render(core.FS(st.Cal, 3))
 			}
+		}
+		if st.ProbeN > 0 {
+			left += t.Lbl.Render(fmt.Sprintf("  probes %d ", st.ProbeN)) + t.Money(int64(st.Probe*core.LAM), true, false).Render(core.FS(st.Probe, 3))
 		}
 	}
 	if m.query != "" && !m.searching {
@@ -724,6 +727,9 @@ func (m *Model) skipCells(r *core.SkipRow, cols []tcol) ([]string, []lipgloss.St
 	if r.HasCal {
 		val, has, mark = r.Cal, true, "~"
 	}
+	if !has && r.HasProbePnl { // no shadow paper: the would-fill probe priced on the later probes' curve samples ("p")
+		val, has, mark = r.ProbePnl, true, "p"
+	}
 	lam := int64(val * core.LAM)
 	ps := t.Dim
 	if has {
@@ -756,10 +762,10 @@ func (m *Model) skipCells(r *core.SkipRow, cols []tcol) ([]string, []lipgloss.St
 			switch {
 			case has:
 				s, st = core.Sol(lam, true, 4, true)+mark, ps
-			case r.ProbeWould > 0: // real probes say a try would have filled, but there is no priced shadow window
+			case r.ProbeWould > 0: // a probe would have filled but no later sample prices it
 				s, st = "fill?", t.Warn
-			case r.ProbeN > 0: // real probes landed and none would have filled: the trade would not have happened
-				s = "no fill"
+			case r.NoDip(): // the price never reached our limit (probes / the shadow window): the trade would not have happened
+				s = "no dip"
 			}
 		case "USD":
 			if has && v.Price != 0 {
@@ -810,15 +816,20 @@ func (m *Model) skipLines(r *core.SkipRow, w int) []string {
 		head = fmt.Sprintf("%s %s: window armed, every try withheld by %s", r.Kind, core.Short(r.Mint, 12), r.Name)
 	}
 	val := "no paper (no shadow window"
-	if r.Kind == "RA" {
+	switch {
+	case r.Kind == "RA" && !r.Shadow:
 		val += ": re-arm windows have none)"
-	} else {
-		val += " filled)"
+	case r.Shadow:
+		val = "no dip: the shadow window never filled (the price never reached our limit; nothing saved or lost)"
+	default:
+		val += " for this trigger)"
 	}
 	if r.ProbeN > 0 {
 		pv := fmt.Sprintf("probes: %d landed, %d would have filled", r.ProbeN, r.ProbeWould)
 		if r.ProbeWould == 0 {
-			pv += " = no trade would have happened (nothing saved or lost)"
+			pv += " = no dip: no trade would have happened (nothing saved or lost)"
+		} else if r.HasProbePnl {
+			pv += " → priced on the later probes' curve samples: " + core.FS(r.ProbePnl, 4) + "◎ (approx)"
 		}
 		val += " · " + pv
 	}

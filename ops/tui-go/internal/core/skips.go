@@ -31,6 +31,11 @@ type SkipRow struct {
 	// dip46 probes on this skipped window (real on-chain tries with an impossible min-out): how many landed and how many of them
 	// would have filled at our limit. ProbeN > 0 && ProbeWould == 0: the trade would not have happened (nothing saved or lost).
 	ProbeN, ProbeWould int
+	// the first would-fill probe priced on the later probes' own curve samples (TP / SL 20%, else the 5-slot exit, else the
+	// window's last sample): an approximation, shown only when there is no shadow paper
+	HasProbePnl bool
+	ProbePnl    float64
+	Shadow      bool // the trigger has a shadow window (a T2 skip): no shadow fill = the price never reached our limit ("no dip")
 }
 
 type skipRec struct {
@@ -263,6 +268,7 @@ func (S *SkipAcc) Rows(F *FiltAcc, R *FiltReport, P *V5Acc) []SkipRow {
 		row := SkipRow{T: r.t, Kind: r.kind, Mint: r.mint, Why: r.why, Name: SkipWhyName(r.why), Cat: skipCat(r.why), Detail: r.detail}
 		if F != nil && r.kind == "T2" && r.sig != "" {
 			if w, ok := F.shW[r.sig]; ok {
+				row.Shadow = true
 				if v, vok := F.paper(w, true); vok {
 					row.HasPaper, row.Paper = true, v
 					if c, cok := cal.Apply(v, "T2", size); cok {
@@ -282,7 +288,7 @@ func (S *SkipAcc) Rows(F *FiltAcc, R *FiltReport, P *V5Acc) []SkipRow {
 			why := it.Filter
 			row := SkipRow{T: it.T, Kind: it.Kind, Mint: it.Mint, Why: why, Name: SkipWhyName(why), Cat: "filter", Withheld: true,
 				Detail: fmt.Sprintf("window w%d armed; every try withheld, never filled", it.W), HasPaper: it.Scored, Paper: it.Sol,
-				HasCal: it.Cal, Cal: it.CalSol, Move: it.Move}
+				HasCal: it.Cal, Cal: it.CalSol, Move: it.Move, Shadow: it.Move != nil || it.Scored}
 			if why == "blocklist" {
 				row.Name = "blocklist (per send)"
 			}
@@ -296,17 +302,43 @@ func (S *SkipAcc) Rows(F *FiltAcc, R *FiltReport, P *V5Acc) []SkipRow {
 				by[l.mint] = append(by[l.mint], l)
 			}
 		}
+		// each probe landing belongs to ONE row: the latest skip of that mint + filter at or before it (2 s slack), within 20 s
+		got := map[int][]*v5Land{}
+		rowsOf := map[string][]int{}
 		for i := range out {
-			r := &out[i]
-			pf := probeFilter(r.Why)
-			for _, l := range by[r.Mint] {
-				if l.t < r.T-int64(2e9) || l.t > r.T+int64(20e9) || !(l.filter == pf || strings.HasPrefix(l.filter, pf)) {
-					continue
+			rowsOf[out[i].Mint] = append(rowsOf[out[i].Mint], i)
+		}
+		for mint, ls := range by {
+			for _, l := range ls {
+				best := -1
+				for _, i := range rowsOf[mint] {
+					r := &out[i]
+					if l.t < r.T-int64(2e9) || l.t > r.T+int64(20e9) {
+						continue
+					}
+					pf := probeFilter(r.Why)
+					if !(l.filter == pf || strings.HasPrefix(l.filter, pf)) {
+						continue
+					}
+					if best < 0 || r.T > out[best].T {
+						best = i
+					}
 				}
-				r.ProbeN++
+				if best >= 0 {
+					got[best] = append(got[best], l)
+				}
+			}
+		}
+		for i, ws := range got {
+			r := &out[i]
+			r.ProbeN = len(ws)
+			for _, l := range ws {
 				if l.wouldFill {
 					r.ProbeWould++
 				}
+			}
+			if r.ProbeWould > 0 {
+				r.ProbePnl, r.HasProbePnl = probePnl(ws)
 			}
 		}
 	}
@@ -335,7 +367,9 @@ func probeFilter(why string) string {
 // SkipsTotals: for a set of rows, how many had a paper value, its wins / losses and the paper / calibrated sums.
 type SkipsTotals struct {
 	N, Scored, WinN, LoseN int
-	NoFill                 int // probes landed and none would have filled (and no shadow paper)
+	NoFill                 int // no dip: the shadow window never filled, or probes landed and none would have filled
+	ProbeN                 int // skips priced from their probes (no shadow paper)
+	Probe                  float64
 	Paper, Cal             float64
 	CalN                   int
 }
@@ -353,8 +387,12 @@ func SumSkips(rows []SkipRow) SkipsTotals {
 				t.LoseN++
 			}
 		}
-		if !r.HasPaper && r.ProbeN > 0 && r.ProbeWould == 0 {
+		if r.NoDip() {
 			t.NoFill++
+		}
+		if !r.HasPaper && r.HasProbePnl {
+			t.ProbeN++
+			t.Probe += r.ProbePnl
 		}
 		if r.HasCal {
 			t.CalN++
@@ -362,4 +400,47 @@ func SumSkips(rows []SkipRow) SkipsTotals {
 		}
 	}
 	return t
+}
+
+// probePnl prices a window's first would-fill probe on the curve states the window's later probes saw (each landing's "pre"
+// reserves): sell at the first sample worth >= 1.2x or <= 0.8x the spend, else at the first sample 5+ slots after the fill, else
+// at the last sample. Costs: the probe's fee and the usual sell cost. false = no later sample.
+func probePnl(ws []*v5Land) (float64, bool) {
+	sort.SliceStable(ws, func(a, b int) bool {
+		if ws[a].slot != ws[b].slot {
+			return ws[a].slot < ws[b].slot
+		}
+		return ws[a].idx < ws[b].idx
+	})
+	var f *v5Land
+	for _, l := range ws {
+		if l.wouldFill && l.wouldTok > 0 && l.spend > 0 {
+			f = l
+			break
+		}
+	}
+	if f == nil {
+		return 0, false
+	}
+	out, ok := 0.0, false
+	for _, l := range ws {
+		if !l.hasPre || l.preVtok <= 0 || l.slot < f.slot || l == f || (l.slot == f.slot && l.idx <= f.idx) {
+			continue
+		}
+		v := pcProceeds(l.preVtok, f.wouldTok)
+		out, ok = v, true
+		if v >= 1.2*f.spend || v <= 0.8*f.spend || l.slot >= f.slot+5 {
+			break
+		}
+	}
+	if !ok {
+		return 0, false
+	}
+	return (out - f.spend - f.fee - pcSellFx) / 1e9, true
+}
+
+// NoDip: no shadow paper and the evidence says the price never reached our limit: real probes landed and none would have filled,
+// or (no probe would have filled and) the trigger's shadow window never filled.
+func (r SkipRow) NoDip() bool {
+	return !r.HasPaper && r.ProbeWould == 0 && (r.ProbeN > 0 || r.Shadow)
 }
