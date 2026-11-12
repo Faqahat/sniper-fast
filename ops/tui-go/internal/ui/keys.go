@@ -68,7 +68,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 	case 3: // trades
 		return []key.Binding{k.Up, k.Enter, k.Sort, k.Order, k.Filter, k.Search, k.Skips, k.Copy, k.Why, k.Unit, k.Help, k.Quit}
 	case 7: // filters
-		return []key.Binding{k.Up, withHelp(k.Filter, "f", "filter"), k.Dism, k.NoFill, k.Shadow, k.Sort, k.Order, k.Copy, k.Help, k.Quit}
+		return []key.Binding{k.Up, withHelp(k.Enter, "enter", "open filter"), withHelp(k.Back, "esc", "back"), withHelp(k.Filter, "f", "list filter"), k.Dism, k.NoFill, k.Shadow, k.Copy, k.Help, k.Quit}
 	case 5: // log
 		return []key.Binding{k.Up, k.End, withHelp(k.Filter, "f", "important/all"), k.Wrap, k.Help, k.Quit}
 	}

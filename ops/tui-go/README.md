@@ -798,3 +798,14 @@ images of a few for a phone: DejaVu Sans Mono on a dark background, roughly what
 - Last column "what" = what the filter does in plain words (`fltWhats`), dropped below ~120 columns.
 - A LIVE row with no scored skip says `no dip` (nothing would have filled) or `n/a` (re-arm: cannot be priced) instead of +0.000.
 - Dismissed (folded behind `d`): + equal-size group, HYBRID-2.
+
+## v5.3 (11-12): selectable filters, a page per filter
+
+- The Filters table's rows are selectable: the cursor (▸ after the circle) starts on the table; ↑ / ↓ move it, past the last row it
+  enters the SKIPPED / BLOCKED list (↑ from the list's first row returns; the list keys f / n / v / o also move it to the list). A
+  click selects a row, a second click opens it.
+- **Enter opens the filter's page**: its circle, name, mode, what it does, saved (cal / paper / real), blocked, would win / lose, a
+  skips line (no dip / paper / cal / probes / n/a) and, for a LOG rule, the real fills it would have blocked; then **everything it
+  blocked in the Trades table** (skip rows `S·T2` / `S·RA` for a live filter, the real trades for a log rule), with the SKIP panel
+  under it for the selected row. Enter on a real trade opens its details, c copies the mint, esc goes back.
+- Code: `scrFilterPage`, `fltPageRows` (internal/ui/filters.go); `--screen WxH --page filterpage | filtersel`; `TestFilterPage`.

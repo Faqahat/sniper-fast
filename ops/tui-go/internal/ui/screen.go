@@ -60,6 +60,14 @@ func RenderScreen(ctx *core.Ctx, o Options, w, h, tab int, page string, keepANSI
 	case "splash":
 		m.loading = true
 		m.loadTotal = max(1, ctx.Src.DoneBytes()*100/43)
+	case "filterpage": // v5.3: the first filter's own page; "filtersel": the Filters tab with the cursor on the table's first row
+		m.tab = 7
+		m.render(w, h)
+		if len(m.fltTblKeys) > 0 {
+			m.fltOpen = m.fltTblKeys[0]
+		}
+	case "filtersel":
+		m.tab, m.fltTblFocus, m.fltCur = 7, true, 1
 	case "skips", "skipsall": // v5.1: the Trades table with the skipped tokens switch on (filter skips / every skip)
 		m.tab, m.skipsMode = 3, map[string]int{"skips": 1, "skipsall": 2}[page]
 	case "today":

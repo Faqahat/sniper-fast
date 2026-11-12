@@ -131,14 +131,22 @@ type Model struct {
 	fltShadow                          bool // Filters: show the LIVE rows scored on the shadow window (v; default hidden)
 	fltDism                            bool // Filters: the DISMISSED filters' rows expanded (d; default one summary line)
 	tradeInfo                          bool // Trades: the flagged-by panel under the table (x)
-	skipsMode                          int  // v5.1 Trades: skipped tokens in the table (t): 0 off (default), 1 filter skips, 2 every skip
-	fltRows                            []core.FiltItem
-	fltRowY                            int
-	flash                              string
-	flashMsgAt                         time.Time
-	totKey                             string
-	totals                             map[int]int64
-	hdrX                               []hdrCell
+	// v5.3 Filters: the table's rows are selectable (the cursor moves up from the list into the table); enter opens the filter's page
+	fltTblFocus            bool
+	fltCur, fltTblY        int
+	fltTblKeys             []string
+	fltTblLine             []int
+	fltOpen                string
+	fltOpenSel, fltOpenTop int
+	fltOpenRows            []*core.Trade
+	skipsMode              int // v5.1 Trades: skipped tokens in the table (t): 0 off (default), 1 filter skips, 2 every skip
+	fltRows                []core.FiltItem
+	fltRowY                int
+	flash                  string
+	flashMsgAt             time.Time
+	totKey                 string
+	totals                 map[int]int64
+	hdrX                   []hdrCell
 
 	// animation
 	spring     harmonica.Spring
@@ -207,6 +215,7 @@ func New(ctx *core.Ctx, o Options) *Model {
 			m.bellLog = f
 		}
 	}
+	m.fltTblFocus = true // v5.3 Filters: the cursor starts on the table (enter opens a filter; down past the last row = the list)
 	return m
 }
 
@@ -647,6 +656,10 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.showHelp = true
 		m.scroll["help"] = 0
 	case "esc":
+		if m.detail == nil && m.tab == 7 && m.fltOpen != "" { // Filters: leave the filter's page
+			m.fltOpen = ""
+			break
+		}
 		m.detail = nil
 		if m.query != "" && m.tab == 3 {
 			m.query = ""
@@ -665,6 +678,7 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.usdFirst = !m.usdFirst
 	case "o": // Trades: the next sort column (each starts descending: newest / largest first)
 		if m.tab == 7 && m.detail == nil { // Filters: the skip list's
+			m.fltTblFocus = false
 			m.fltSort = (m.fltSort + 1) % len(fltSortKeys)
 			m.fltAsc = false
 			m.fltSel, m.fltTop = 0, 0
@@ -689,6 +703,8 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			tr = m.detail
 		} else if m.tab == 3 && len(m.tradeRows) > 0 {
 			tr = m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)]
+		} else if m.tab == 7 && m.fltOpen != "" && len(m.fltOpenRows) > 0 { // Filters: a filter's page
+			tr = m.fltOpenRows[min(m.fltOpenSel, len(m.fltOpenRows)-1)]
 		} else if m.tab == 7 && len(m.fltRows) > 0 { // Filters: the selected item's mint
 			if mint := m.fltRows[min(m.fltSel, len(m.fltRows)-1)].Mint; mint != "" {
 				m.flash, m.flashMsgAt = "copied "+core.Short(mint, 8)+m.g("…", "~"), m.now()
@@ -775,11 +791,13 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.logAll = !m.logAll
 			m.logOff = 0
 		} else if m.tab == 7 && m.detail == nil { // Filters: all / LIVE / LOG / each filter
+			m.fltTblFocus = false // a list key: the cursor goes to the list
 			m.fltFilter = (m.fltFilter + 1) % len(m.fltChoices())
 			m.fltSel, m.fltTop = 0, 0
 		}
 	case "v": // Filters: the LIVE rows scored on the shadow window shown / hidden (the table always counts them)
 		if m.tab == 7 && m.detail == nil {
+			m.fltTblFocus = false
 			m.fltShadow = !m.fltShadow
 			m.fltSel, m.fltTop = 0, 0
 		}
@@ -798,6 +816,7 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "n": // Filters: the items whose shadow window never filled (no value) on / off
 		if m.tab == 7 && m.detail == nil {
+			m.fltTblFocus = false
 			m.fltAll = !m.fltAll
 			m.fltSel, m.fltTop = 0, 0
 		}
@@ -815,6 +834,16 @@ func (m *Model) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.tab == 3 && m.detail == nil && len(m.tradeRows) > 0 && m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)].Kind != "SKIP" {
 			m.detail = m.tradeRows[min(m.tradeSel, len(m.tradeRows)-1)]
 			m.scroll["detail"] = 0
+		} else if m.tab == 7 && m.detail == nil && m.fltOpen != "" { // Filters: a filter's page: a real trade's details
+			if len(m.fltOpenRows) > 0 {
+				if tr := m.fltOpenRows[min(m.fltOpenSel, len(m.fltOpenRows)-1)]; tr.Kind != "SKIP" {
+					m.detail = tr
+					m.scroll["detail"] = 0
+				}
+			}
+		} else if m.tab == 7 && m.detail == nil && m.fltTblFocus && len(m.fltTblKeys) > 0 { // Filters: open the selected filter
+			m.fltOpen = m.fltTblKeys[min(m.fltCur, len(m.fltTblKeys)-1)]
+			m.fltOpenSel, m.fltOpenTop = 0, 0
 		} else if m.tab == 7 && m.detail == nil && len(m.fltRows) > 0 { // Filters: a LOG item's trade
 			if tr := m.fltTrade(m.fltRows[min(m.fltSel, len(m.fltRows)-1)]); tr != nil {
 				m.detail = tr
@@ -860,6 +889,30 @@ func (m *Model) scrollKey(k string) {
 		default:
 			m.tradeSel = max(0, min(n-1, m.tradeSel+d))
 		}
+	case m.tab == 7 && m.detail == nil && m.fltOpen != "": // a filter's page
+		n := len(m.fltOpenRows)
+		switch {
+		case home:
+			m.fltOpenSel = 0
+		case end:
+			m.fltOpenSel = max(0, n-1)
+		default:
+			m.fltOpenSel = max(0, min(n-1, m.fltOpenSel+d))
+		}
+	case m.tab == 7 && m.detail == nil && m.fltTblFocus: // the table's rows; past the last one the cursor enters the list
+		nk := len(m.fltTblKeys)
+		switch {
+		case home:
+			m.fltCur = 0
+		case end:
+			m.fltTblFocus = false
+			m.fltSel = max(0, len(m.fltRows)-1)
+		case m.fltCur+d >= nk && len(m.fltRows) > 0:
+			m.fltTblFocus = false
+			m.fltSel = 0
+		default:
+			m.fltCur = max(0, min(nk-1, m.fltCur+d))
+		}
 	case m.tab == 7 && m.detail == nil:
 		n := len(m.fltRows)
 		switch {
@@ -867,6 +920,9 @@ func (m *Model) scrollKey(k string) {
 			m.fltSel = 0
 		case end:
 			m.fltSel = max(0, n-1)
+		case d < 0 && m.fltSel == 0 && len(m.fltTblKeys) > 0: // up from the list's first row: into the table
+			m.fltTblFocus = true
+			m.fltCur = len(m.fltTblKeys) - 1
 		default:
 			m.fltSel = max(0, min(n-1, m.fltSel+d))
 		}
@@ -900,6 +956,8 @@ func (m *Model) scrollBy(d int) {
 		m.tradeSel = max(0, min(n-1, m.tradeSel+d))
 	case m.tab == 5 && m.detail == nil && !m.showHelp:
 		m.logOff = max(0, m.logOff-d)
+	case m.tab == 7 && m.detail == nil && !m.showHelp && m.fltOpen != "":
+		m.fltOpenSel = max(0, min(len(m.fltOpenRows)-1, m.fltOpenSel+d))
 	case m.tab == 7 && m.detail == nil && !m.showHelp:
 		m.fltSel = max(0, min(len(m.fltRows)-1, m.fltSel+d))
 	default:
@@ -939,7 +997,21 @@ func (m *Model) onClick(mm tea.Mouse) tea.Cmd {
 		m.clickHeader(mm.X)
 		return nil
 	}
-	if m.tab == 7 && m.detail == nil && m.fltRowY > 0 && mm.Y >= m.fltRowY {
+	if m.tab == 7 && m.detail == nil && m.fltOpen == "" && m.fltTblY > 0 { // Filters: a click on a table row selects it, a second one opens it
+		for i, ln := range m.fltTblLine {
+			if mm.Y == m.fltTblY+ln {
+				if m.fltTblFocus && m.fltCur == i {
+					m.fltOpen = m.fltTblKeys[i]
+					m.fltOpenSel, m.fltOpenTop = 0, 0
+				} else {
+					m.fltTblFocus, m.fltCur = true, i
+				}
+				return nil
+			}
+		}
+	}
+	if m.tab == 7 && m.detail == nil && m.fltOpen == "" && m.fltRowY > 0 && mm.Y >= m.fltRowY {
+		m.fltTblFocus = false
 		i := m.fltTop + (mm.Y - m.fltRowY)
 		if i >= 0 && i < len(m.fltRows) {
 			m.fltSel = i
@@ -1068,7 +1140,8 @@ func (m *Model) bodyKey(w, bh int) string {
 	M := m.ctx.Src.Model
 	flt := ""
 	if m.tab == 7 {
-		flt = fmt.Sprintf("|%d|%d|%d|%d|%v|%v", m.fltSel, m.fltTop, m.fltFilter, m.fltSort, m.fltAsc, m.fltAll) + fmt.Sprintf("|%v|%v", m.fltShadow, m.fltDism)
+		flt = fmt.Sprintf("|%d|%d|%d|%d|%v|%v", m.fltSel, m.fltTop, m.fltFilter, m.fltSort, m.fltAsc, m.fltAll) + fmt.Sprintf("|%v|%v", m.fltShadow, m.fltDism) +
+			fmt.Sprintf("|%v|%d|%s|%d|%d", m.fltTblFocus, m.fltCur, m.fltOpen, m.fltOpenSel, m.fltOpenTop)
 	}
 	flt += fmt.Sprintf("|x%v|sk%d", m.tradeInfo, m.skipsMode)
 	return flt + fmt.Sprintf("%d|%v|%v|%d|%d|%d|%d|%s|%d|%d|%d|%d|%d|%d|%s|%v|%v|%d|%v|%v|%d|%v|%d|%v|%v|%g|%s|%d|%d|%d|%d|%d",

@@ -498,12 +498,12 @@ func (m *Model) fltTableLines(w int) []string {
 	switch mode {
 	case 0:
 		papW = 0
-		tagW, vdW, netW, precW = 2, 0, 9, 0
-		nameW = max(8, min(26, w-54-srcW))
+		tagW, vdW, netW, precW = 3, 0, 9, 0
+		nameW = max(8, min(26, w-55-srcW))
 	case 1:
 		papW = 0
-		tagW, vdW, netW, precW = 2, 0, 9, 0
-		nameW = max(8, min(26, w-32-srcW))
+		tagW, vdW, netW, precW = 3, 0, 9, 0
+		nameW = max(8, min(26, w-33-srcW))
 	default:
 		papW = 0
 		tagW, vdW, netW, precW = 2, 0, 8, 0
@@ -521,7 +521,7 @@ func (m *Model) fltTableLines(w int) []string {
 	}
 	whyW := 0
 	if mode == 0 {
-		whyW = w - (54 + srcW + nameW) - 3
+		whyW = w - (55 + srcW + nameW) - 3
 		if whyW < 24 { // too narrow to say what the filter does: drop the column
 			whyW = 0
 		}
@@ -613,6 +613,7 @@ func (m *Model) fltTableLines(w int) []string {
 		}
 		return t.Lbl.Render(s)
 	}
+	rowSel := false // the row being rendered is the selected one
 	row := func(r core.FiltRow) string {
 		name := fltClean(r.Name)
 		if ansi.StringWidth(name) > nameW {
@@ -626,7 +627,18 @@ func (m *Model) fltTableLines(w int) []string {
 			lbl = fltVerdictShort(lbl)
 		}
 		_ = lbl
-		s := tag + strings.Repeat(" ", max(0, tagW-ansi.StringWidth(tag))) + t.Val.Render(padRight(name, nameW))
+		pad, nst := strings.Repeat(" ", max(0, tagW-ansi.StringWidth(tag))), t.Val
+		if rowSel && len(pad) > 0 { // the cursor: a marker after the circle, the name highlighted
+			pad = pad[:len(pad)-1] + t.Acc.Render(m.g("\u25b8", ">"))
+			if len(pad) > 1 && tagW == 3 {
+				pad = " " + t.Acc.Render(m.g("\u25b8", ">"))
+			}
+			nst = t.B.Background(t.SelBg)
+			if t.Mono {
+				nst = t.B.Reverse(true)
+			}
+		}
+		s := tag + pad + nst.Render(padRight(name, nameW))
 		if r.NA { // a rule this run does not log (the landing guard before dip30)
 			if mode == 2 {
 				return s + " " + t.Dim.Render(padLeft("n/a", netW)+" dip30+")
@@ -694,6 +706,15 @@ func (m *Model) fltTableLines(w int) []string {
 		return d
 	}
 	out := []string{hdr()}
+	m.fltTblKeys, m.fltTblLine = m.fltTblKeys[:0], m.fltTblLine[:0]
+	sel := func(r core.FiltRow) string { // v5.3: the table's rows are selectable (enter opens the filter's page)
+		i := len(m.fltTblKeys)
+		m.fltTblKeys, m.fltTblLine = append(m.fltTblKeys, r.Key), append(m.fltTblLine, len(out))
+		rowSel = m.fltTblFocus && i == m.fltCur && m.fltOpen == ""
+		l := row(r)
+		rowSel = false
+		return l
+	}
 	var dism []core.FiltRow
 	var idle []string // dipmon 3.3: the rows with no blocks yet, folded into one line by name
 	for _, r := range fltSortedRows(R.Rows) {
@@ -705,7 +726,7 @@ func (m *Model) fltTableLines(w int) []string {
 			idle = append(idle, fltClean(r.Name))
 			continue
 		}
-		out = append(out, row(r))
+		out = append(out, sel(r))
 		if r.Key == "deeper" && R.Deep {
 			out = append(out, deepLine())
 		}
@@ -758,7 +779,7 @@ func (m *Model) fltTableLines(w int) []string {
 		out = append(out, l)
 		if m.fltDism {
 			for _, r := range dism {
-				out = append(out, row(r))
+				out = append(out, sel(r))
 			}
 		}
 	}
@@ -813,6 +834,9 @@ func (m *Model) scrFilters(w, bh int) string {
 		m.fltRowY = 0
 		return m.rule("FILTERS", "", w) + "\n" + t.Lbl.Render("no filter records in this run (pre-send skips, deeper-limit tries, annotations)")
 	}
+	if m.fltOpen != "" {
+		return m.scrFilterPage(w, bh)
+	}
 	sep := t.Dim.Render(" " + m.g("·", "|") + " ")
 	var out []string
 	livePap := " live: blocks trades (paper)"
@@ -831,7 +855,9 @@ func (m *Model) scrFilters(w, bh int) string {
 		}
 		out = append(out, cut(note, w))
 	}
+	m.fltTblY = m.bodyY + len(out)
 	out = append(out, m.fltTableLines(w)...)
+	m.fltCur = max(0, min(m.fltCur, len(m.fltTblKeys)-1))
 	// the legend: what net saved / prec / verdict mean (one line), then (wide) how LIVE and LOG rows are scored
 	foot := t.Pos.Render("green") + t.Dim.Render(" = the filter saved money, ") + t.Neg.Render("red") + t.Dim.Render(" = it cost money") + sep + t.Dim.Render("blocked = triggers / windows it stopped; would win / lose = the ones that would have filled")
 	out = append(out, cut(foot, w))
@@ -885,6 +911,9 @@ func (m *Model) scrFilters(w, bh int) string {
 	if w >= 110 {
 		rt += t.Dim.Render("   f filter  n no-dip  v shadow  o sort  O order  c copy")
 	}
+	if w >= 100 && !m.fltTblFocus {
+		left += t.Dim.Render("   " + m.g("\u2191", "up") + " from the first row: back to the filters")
+	}
 	out = append(out, m.rule("SKIPPED / BLOCKED", "", w))
 	out = append(out, lr(left, rt, w))
 	rowsAvail := bh - len(out)
@@ -917,7 +946,11 @@ func (m *Model) scrFilters(w, bh int) string {
 	}
 	m.fltRowY = m.bodyY + len(out) + 1
 	vis := items[m.fltTop:min(n, m.fltTop+rowsAvail)]
-	out = append(out, m.fltList(w, vis, m.fltSel-m.fltTop))
+	lsel := m.fltSel - m.fltTop
+	if m.fltTblFocus { // the cursor is in the table: no marker in the list
+		lsel = -1
+	}
+	out = append(out, m.fltList(w, vis, lsel))
 	if n > rowsAvail {
 		m.moreHint = fmt.Sprintf("%d/%d", m.fltSel+1, n)
 	}
@@ -1189,4 +1222,135 @@ func (m *Model) fltDip(key string) (nodip, unknown int) {
 		}
 	}
 	return nodip, unknown
+}
+
+// ------------------------------------------------------------------------------------------------- a filter's page (v5.3)
+
+// fltPageRows: everything the filter blocked, as Trades-table rows: a LIVE filter's skipped triggers / withheld windows (the
+// Trades tab's skip rows), a LOG rule's real fills it would have blocked (the real trades), newest first.
+func (m *Model) fltPageRows(key string) []*core.Trade {
+	var out []*core.Trade
+	if m.view == nil || m.view.Filt == nil {
+		return nil
+	}
+	for _, tr := range m.view.SkipTrades {
+		if r := tr.Skip; r.Why == key || strings.TrimPrefix(r.Why, "rearm_") == key {
+			out = append(out, tr)
+		}
+	}
+	seen := map[*core.Trade]bool{}
+	for _, it := range m.view.Filt.Items {
+		if it.Live {
+			continue
+		}
+		hit := false
+		for _, r := range it.Rules {
+			if r == key {
+				hit = true
+			}
+		}
+		if !hit {
+			continue
+		}
+		if tr := m.fltTrade(it); tr != nil && !seen[tr] {
+			seen[tr] = true
+			out = append(out, tr)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].T > out[j].T })
+	return out
+}
+
+// scrFilterPage: one filter: what it is, its numbers, then every trigger / fill it blocked in the Trades table (enter on a real
+// trade opens its details, c copies the mint, esc goes back).
+func (m *Model) scrFilterPage(w, bh int) string {
+	t := m.th
+	R := m.view.Filt
+	row, ok := R.Row(m.fltOpen)
+	if !ok {
+		m.fltOpen = ""
+		return m.scrFilters(w, bh)
+	}
+	live := row.Type == "LIVE"
+	mode := "log: it only marks what it would block"
+	if live {
+		mode = "live: it blocks trades"
+	}
+	out := []string{m.rule("FILTER", t.Dim.Render("esc back   enter trade details   c copy mint"), w)}
+	out = append(out, m.fltTag(live, false)+" "+t.B.Render(fltClean(row.Name))+t.Lbl.Render("   "+mode))
+	if what := fltWhat(row.Key, fltVerdictOf(row).why); what != "" {
+		out = append(out, t.Lbl.Render("  what    ")+t.Val.Render(cut(what, max(10, w-10))))
+	}
+	rows := m.fltPageRows(m.fltOpen)
+	m.fltOpenRows = rows
+	var sk []core.SkipRow
+	nReal, realW := 0, 0
+	var realSum int64
+	for _, x := range rows {
+		if x.Skip != nil {
+			sk = append(sk, *x.Skip)
+		} else if x.HasPnl {
+			nReal++
+			realSum += x.Pnl
+			if x.Pnl > 0 {
+				realW++
+			}
+		}
+	}
+	saved, src := row.ShownNet(), "paper"
+	if row.Cal {
+		src = "calibrated"
+	} else if !live {
+		src = "real fills"
+	}
+	num := t.Lbl.Render("  saved   ") + m.solCell(saved, row.WinN+row.LoseN+row.CalWinN+row.CalLoseN, true) + t.Lbl.Render(" ("+src+")   blocked ") + t.Val.Render(core.IC(int64(row.Blocked)))
+	wn, ln, ws, ls := row.WinN, row.LoseN, row.WinSol, row.LoseSol
+	if row.Cal {
+		wn, ln, ws, ls = row.CalWinN, row.CalLoseN, row.CalWinSol, row.CalLoseSol
+	}
+	num += t.Lbl.Render("   would win ") + t.Neg.Render(fmt.Sprint(wn)) + " " + m.invCell(ws, wn, false) + t.Lbl.Render("   would lose ") + t.Pos.Render(fmt.Sprint(ln)) + " " + m.invCell(ls, ln, false)
+	out = append(out, cut(num, w))
+	if len(sk) > 0 {
+		st := core.SumSkips(sk)
+		l := t.Lbl.Render(fmt.Sprintf("  skips   %d", st.N)) + t.Dim.Render(fmt.Sprintf("   no dip %d   paper %dW/%dL %s", st.NoFill, st.WinN, st.LoseN, core.FS(st.Paper, 3)))
+		if st.CalN > 0 {
+			l += t.Dim.Render("   cal " + core.FS(st.Cal, 3))
+		}
+		if st.ProbeN > 0 {
+			l += t.Dim.Render(fmt.Sprintf("   probes %d %s", st.ProbeN, core.FS(st.Probe, 3)))
+		}
+		if un := st.N - st.NoFill - st.Scored - st.ProbeN; un > 0 {
+			l += t.Dim.Render(fmt.Sprintf("   n/a %d", un))
+		}
+		out = append(out, cut(l, w))
+	}
+	if nReal > 0 {
+		out = append(out, t.Lbl.Render(fmt.Sprintf("  fills   %d real fills it would have blocked: %dW/%dL ", nReal, realW, nReal-realW))+t.Money(realSum, true, false).Render(core.SolS(realSum)))
+	}
+	n := len(rows)
+	if n == 0 {
+		out = append(out, "", t.Lbl.Render("nothing blocked yet in this run"))
+		m.fltOpenSel, m.fltOpenTop = 0, 0
+		return strings.Join(out, "\n")
+	}
+	m.fltOpenSel = max(0, min(m.fltOpenSel, n-1))
+	var why []string
+	if cur := rows[m.fltOpenSel]; cur.Skip != nil {
+		why = m.skipLines(cur.Skip, w)
+	}
+	rowsAvail := max(1, bh-len(out)-1-len(why))
+	if m.fltOpenSel < m.fltOpenTop {
+		m.fltOpenTop = m.fltOpenSel
+	}
+	if m.fltOpenSel >= m.fltOpenTop+rowsAvail {
+		m.fltOpenTop = m.fltOpenSel - rowsAvail + 1
+	}
+	m.fltOpenTop = max(0, min(m.fltOpenTop, max(0, n-rowsAvail)))
+	vis := rows[m.fltOpenTop:min(n, m.fltOpenTop+rowsAvail)]
+	out = append(out, m.tradeTable(w, vis, m.fltOpenSel-m.fltOpenTop))
+	out = append(out, why...)
+	if n > rowsAvail {
+		m.moreHint = fmt.Sprintf("%d/%d", m.fltOpenSel+1, n)
+	}
+	return strings.Join(out, "\n")
 }

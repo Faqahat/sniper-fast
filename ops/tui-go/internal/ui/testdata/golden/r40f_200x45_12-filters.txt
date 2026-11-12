@@ -5,25 +5,25 @@
   1 Overview   2 Engine   3 Regular   4 Trades   5 Health   6 Log   7 Config   8 Filters
 FILTERS ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ● live: blocks trades (cal) · ● log only, would-have (real fills)
 saved = what its blocks would have lost · cal = expected live value · real = real fills · no dip = nothing would have filled · n/a = cannot be priced
-  filter                         saved src  │ blocked │     would win │    would lose   what
-● create-slot skip              +2.196 cal  │   1,036 │   31   +0.668 │  150   -2.864   whale bought in the token's first slot
-● age-1 skip                    +0.586 cal  │     137 │    5   +0.070 │   33   -0.656   token only 1 slot old
-● deeper limit                  +0.401 cal  │     348 │   13   +0.310 │   45   -0.711   deeper limit while a 6% holder stays
-  └ 77 deep fills: real +0.133 vs cal paper -0.862 = gain +0.995  NET +1.396 cal  (paper gain +1.092, NET +0.177)
-● QUIET                         +0.386 cal  │     254 │    3   +0.063 │   23   -0.449   quiet token: no bot follow-up on the whale's past dumps
-● 10-sec skip                   +0.035 cal  │      92 │    1   +0.014 │    2   -0.049   lone whale, token older than 10 s
-● bad creator                   -0.300 real │      21 │    9   +0.646 │   12   -0.346   bad creator (run only)
-● group risk                    +0.721 real │      22 │    8   +0.284 │   14   -1.004   fast-selling holders in at our landing
-▸ 3 DISMISSED  d show           +1.011 real │      44 │   17   +0.639 │   27   -1.650   holder clock, safe timer, landing guard
-LIVE total (unique triggers)    +3.604 cal  │   1,867 │   53   +1.125 │  253   -4.729   incl. deep +4.599
-LOG total (unique fills)        +0.640 real │      48 │   19   +0.969 │   29   -1.608   19 fills in 2+ rules
-ALL total                       +4.244 cal  │   1,915 │   72   +2.094 │  282   -6.338   LIVE cal+LOG real
+   filter                         saved src  │ blocked │     would win │    would lose   what
+● ▸create-slot skip              +2.196 cal  │   1,036 │   31   +0.668 │  150   -2.864   whale bought in the token's first slot
+●  age-1 skip                    +0.586 cal  │     137 │    5   +0.070 │   33   -0.656   token only 1 slot old
+●  deeper limit                  +0.401 cal  │     348 │   13   +0.310 │   45   -0.711   deeper limit while a 6% holder stays
+   └ 77 deep fills: real +0.133 vs cal paper -0.862 = gain +0.995  NET +1.396 cal  (paper gain +1.092, NET +0.177)
+●  QUIET                         +0.386 cal  │     254 │    3   +0.063 │   23   -0.449   quiet token: no bot follow-up on the whale's past dumps
+●  10-sec skip                   +0.035 cal  │      92 │    1   +0.014 │    2   -0.049   lone whale, token older than 10 s
+●  bad creator                   -0.300 real │      21 │    9   +0.646 │   12   -0.346   bad creator (run only)
+●  group risk                    +0.721 real │      22 │    8   +0.284 │   14   -1.004   fast-selling holders in at our landing
+▸ 3 DISMISSED  d show            +1.011 real │      44 │   17   +0.639 │   27   -1.650   holder clock, safe timer, landing guard
+LIVE total (unique triggers)     +3.604 cal  │   1,867 │   53   +1.125 │  253   -4.729   incl. deep +4.599
+LOG total (unique fills)         +0.640 real │      48 │   19   +0.969 │   29   -1.608   19 fills in 2+ rules
+ALL total                        +4.244 cal  │   1,915 │   72   +2.094 │  282   -6.338   LIVE cal+LOG real
 green = the filter saved money, red = it cost money · blocked = triggers / windows it stopped; would win / lose = the ones that would have filled
 re-arm skips 3,709 have no value yet (no shadow window or probes for re-arm)
 SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 all  (48)  +1,867 shadow (v)                                                                                                     19W 29L  -0.640   f filter  n no-dip  v shadow  o sort  O order  c copy
         ▼time type filter                                     kind mint                                         result      SOL
-▸  1:29:41 AM ●    safe sell timer, group risk, holder clock  T2   F36E6XcspEmQgM1Q5NRDyTJ6NCpFwmTf8b45dsBdpump LOSE    -0.1208 real fill
+   1:29:41 AM ●    safe sell timer, group risk, holder clock  T2   F36E6XcspEmQgM1Q5NRDyTJ6NCpFwmTf8b45dsBdpump LOSE    -0.1208 real fill
    1:01:48 AM ●    bad creator                                T2   7BD66fjAHhGxhmRsdVo6uMoHdR2pU7tq78bjAvqYpump LOSE    -0.0135 real fill
    1:01:41 AM ●    group risk                                 T2   APMC9uzN5Cyak8CAwLEmwhXoXwsvoisi3RPYNqdwpump LOSE    -0.2332 real fill
   12:45:12 AM ●    safe sell timer, group risk, holder clock  T2   4sneNyF5942bfnCtWwBZBKiwW52Qsfn5jEUdUupHU5v6 WIN     +0.1411 real fill
@@ -42,4 +42,4 @@ all  (48)  +1,867 shadow (v)                                                    
   10:37:12 PM ●    bad creator                                T2   Eov96GP1cFWDEEWm9rbJnbw8qmnUSU5jCK56sHfXpump LOSE    -0.0497 real fill
   10:22:46 PM ●    bad creator                                RA   6K4Wj3veGtWi7r1X7U5yG9LaktyookvdgmNj84aspump WIN     +0.0497 real fill
  ▲ engine gone without DIP DONE
- ↑/k up · f filter · d dismissed filters · n no-dip rows · v shadow rows · o sort column · O flip order · c copy mint · ? help · q quit                                                 1/48  ♪ all  1s
+ ↑/k up · enter open filter · esc back · f list filter · d dismissed filters · n no-dip rows · v shadow rows · c copy mint · ? help · q quit                                            1/48  ♪ all  1s

@@ -4,27 +4,27 @@
   1 Ovw   2 Eng   3 Reg   4 Trd   5 Hlth   6 Log   7 Cfg   8 Flt
 FILTERS ─────────────────────────────────────────────────── ● live · ● log only
 saved = what its blocks would have lost · cal = expected live value · real = re…
-  filter                         saved src  │ blocked    W    L
-● create-slot skip              +2.196 cal  │   1,036   31  150
-● age-1 skip                    +0.586 cal  │     137    5   33
-● deeper limit                  +0.401 cal  │     348   13   45
-  └ 77 deep fills gain +0.995  NET +1.396 c
-● QUIET                         +0.386 cal  │     254    3   23
-● 10-sec skip                   +0.035 cal  │      92    1    2
-● bad creator                   -0.300 real │      21    9   12
-● group risk                    +0.721 real │      22    8   14
-▸ 3 DISMISSED  d show           +1.011 real │      44   17   27
-LIVE total (unique triggers)    +3.604 cal  │   1,867   53  253
-LOG total (unique fills)        +0.640 real │      48   19   29
-ALL total                       +4.244 cal  │   1,915   72  282
+   filter                         saved src  │ blocked    W    L
+● ▸create-slot skip              +2.196 cal  │   1,036   31  150
+●  age-1 skip                    +0.586 cal  │     137    5   33
+●  deeper limit                  +0.401 cal  │     348   13   45
+   └ 77 deep fills gain +0.995  NET +1.396 c
+●  QUIET                         +0.386 cal  │     254    3   23
+●  10-sec skip                   +0.035 cal  │      92    1    2
+●  bad creator                   -0.300 real │      21    9   12
+●  group risk                    +0.721 real │      22    8   14
+▸ 3 DISMISSED  d show            +1.011 real │      44   17   27
+LIVE total (unique triggers)     +3.604 cal  │   1,867   53  253
+LOG total (unique fills)         +0.640 real │      48   19   29
+ALL total                        +4.244 cal  │   1,915   72  282
 green = the filter saved money, red = it cost money · blocked = triggers / wind…
 SKIPPED / BLOCKED ─────────────────────────────────────────────────────────────
 all  (48)  +1,867 shadow (v)                                     19W 29L  -0.640
         ▼time type filter           kind mint     result      SOL
-▸  1:29:41 AM ●    safe timer +2    T2   F36E6Xcs LOSE    -0.1208
+   1:29:41 AM ●    safe timer +2    T2   F36E6Xcs LOSE    -0.1208
    1:01:48 AM ●    bad creator      T2   7BD66fjA LOSE    -0.0135
    1:01:41 AM ●    group risk       T2   APMC9uzN LOSE    -0.2332
   12:45:12 AM ●    safe timer +2    T2   4sneNyF5 WIN     +0.1411
   12:33:21 AM ●    bad creator      T2   99hmVC2Z LOSE    -0.0191
  ▲ engine gone without DIP DONE
- ↑/k up · f filter · d dismissed filters …                      1/48  ♪ all  1s
+ ↑/k up · enter open filter · esc back · f list filter · d dis… 1/48  ♪ all  1s

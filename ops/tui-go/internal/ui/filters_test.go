@@ -265,8 +265,8 @@ func TestFiltersShadowToggle(t *testing.T) {
 	m.Init()
 	drive(m, tea.WindowSizeMsg{Width: 160, Height: 50})
 	out := drive(m, keyMsg("8"))
-	table := func(s string) string { // the lines of the overview table (up to the skip list)
-		return strings.Split(s, "SKIPPED / BLOCKED")[0]
+	table := func(s string) string { // the lines of the overview table (up to the skip list); v5.3: without the row cursor
+		return strings.ReplaceAll(ansi.Strip(strings.Split(s, "SKIPPED / BLOCKED")[0]), "\u25b8", " ")
 	}
 	t0 := table(out)
 	if len(m.fltRows) != 3 { // default: only the 3 LOG items... (2 flagged fills + none else) -> M1, M2 only
@@ -338,12 +338,12 @@ func TestFiltersVerdicts(t *testing.T) {
 			t.Errorf("%s shown while folded", s)
 		}
 	}
-	if strings.Contains(table, "\u25cf safe sell timer") {
+	if strings.Contains(table, "\u25cf  safe sell timer") {
 		t.Errorf("dismissed rows shown by default:\n%s", table)
 	}
 	out = ansi.Strip(drive(m, keyMsg("d")))
 	table = strings.Split(out, "SKIPPED / BLOCKED")[0]
-	if !strings.Contains(table, "\u25cf safe sell timer") || !strings.Contains(table, "DISMISSED  d hide") || !strings.Contains(table, "\u25cf holder clock") {
+	if !strings.Contains(table, "\u25cf  safe sell timer") || !strings.Contains(table, "DISMISSED  d hide") || !strings.Contains(table, "\u25cf  holder clock") {
 		t.Errorf("d: the dismissed rows are not shown:\n%s", table)
 	}
 	for _, sz := range [][2]int{{200, 45}, {120, 40}, {100, 30}, {99, 30}, {80, 30}, {76, 24}, {75, 24}, {50, 30}, {49, 20}, {40, 20}, {36, 12}} {
@@ -495,5 +495,61 @@ func TestFiltersNoDipMove(t *testing.T) {
 	}
 	if m.uiErrs != 0 {
 		t.Fatalf("UI errors: %s", m.uiErr)
+	}
+}
+
+// TestFilterPage (v5.3): the cursor starts on the table, down moves it, enter opens the filter's page (its info and the
+// Trades-style table of what it blocked), esc returns; at many sizes no panic and no line wider than the screen.
+func TestFilterPage(t *testing.T) {
+	ctx := r40fCtx(t, r40fSeed)
+	o := Options{Sound: "all", Version: "test", Golden: true, Interval: 1, LoadDuty: 1, Strict: true}
+	for _, sz := range [][2]int{{200, 45}, {120, 40}, {100, 30}, {80, 30}, {60, 24}, {40, 20}} {
+		m := New(ctx, o)
+		m.Init()
+		drive(m, tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
+		out := ansi.Strip(drive(m, keyMsg("8")))
+		if !m.fltTblFocus || len(m.fltTblKeys) == 0 || !strings.Contains(out, "\u25b8") {
+			t.Fatalf("%v: no cursor on the table", sz)
+		}
+		drive(m, keyMsg("down"))
+		if m.fltCur != 1 {
+			t.Fatalf("%v: down: cursor %d", sz, m.fltCur)
+		}
+		drive(m, keyMsg("up"))
+		key := m.fltTblKeys[0]
+		out = ansi.Strip(drive(m, keyMsg("enter")))
+		if m.fltOpen != key || !strings.Contains(out, "FILTER") || strings.Contains(out, "SKIPPED / BLOCKED") {
+			t.Fatalf("%v: enter did not open the filter page (%q)", sz, m.fltOpen)
+		}
+		if len(m.fltOpenRows) == 0 {
+			t.Fatalf("%v: %s: no rows on its page", sz, key)
+		}
+		for i, l := range strings.Split(out, "\n") {
+			if w := ansi.StringWidth(l); w > sz[0] {
+				t.Errorf("%v line %d: %d cells", sz, i+1, w)
+			}
+		}
+		drive(m, keyMsg("down"))
+		drive(m, keyMsg("end"))
+		drive(m, keyMsg("home"))
+		out = ansi.Strip(drive(m, keyMsg("esc")))
+		if m.fltOpen != "" || !strings.Contains(out, "FILTERS") {
+			t.Fatalf("%v: esc did not return", sz)
+		}
+		for i := 0; i < len(m.fltTblKeys)+3; i++ { // down past the table: into the list, then up back
+			drive(m, keyMsg("down"))
+		}
+		if m.fltTblFocus && len(m.fltRows) > 0 {
+			t.Errorf("%v: the cursor never reached the list", sz)
+		}
+		for i := 0; i < 50 && !m.fltTblFocus; i++ {
+			drive(m, keyMsg("up"))
+		}
+		if !m.fltTblFocus {
+			t.Errorf("%v: up from the list's first row did not return to the table", sz)
+		}
+		if m.uiErrs != 0 {
+			t.Errorf("%v: %d UI errors", sz, m.uiErrs)
+		}
 	}
 }

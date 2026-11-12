@@ -3,7 +3,7 @@
 FILTERS ───────────────────── ● live · ● log only
 saved = what its blocks would have lost · cal = e…
   filter              saved   blkd   W   L
-● create-slot skip   +2.196c 1,036  31 150
+●▸create-slot skip   +2.196c 1,036  31 150
 ● age-1 skip         +0.586c   137   5  33
 ● deeper limit       +0.401c   348  13  45
   └ 77 deep fills gain +0.995  NET +1.396 c
@@ -19,7 +19,7 @@ green = the filter saved money, red = it cost mon…
 SKIPPED / BLOCKED ───────────────────────────────
 all  (48)  +1,867 shadow (v)       19W 29L  -0.640
         ▼time ty filter     mint   res      SOL
-▸  1:29:41 AM ●  ST+GR+HC   F36E6X LOSE  -0.121
+   1:29:41 AM ●  ST+GR+HC   F36E6X LOSE  -0.121
    1:01:48 AM ●  bad creat… 7BD66f LOSE  -0.014
    1:01:41 AM ●  group risk APMC9u LOSE  -0.233
   12:45:12 AM ●  ST+GR+HC   4sneNy WIN   +0.141
@@ -27,4 +27,4 @@ all  (48)  +1,867 shadow (v)       19W 29L  -0.640
   12:29:24 AM ●  bad creat… FkaMPD WIN   +0.285
   12:24:43 AM ●  BC+ST+GR+… B6Ygbi WIN   +0.040
  ▲ engine gone without DIP DONE
- ↑/k up · f filter …              1/48  ♪ all  1s
+ ↑/k up …                         1/48  ♪ all  1s
