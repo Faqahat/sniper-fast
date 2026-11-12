@@ -714,6 +714,9 @@ func (m *Model) scrHealth(w, bh int) string {
 		}
 		E = append(E, m.kv("process", 10, st.Render(why)))
 	}
+	if l := m.tradingKV(); l != "" { // v5: the real trading state (the header's)
+		E = append(E, l)
+	}
 	stall := v.Running && v.HasWrite && v.WriteAge > 30
 	ageS := func(a float64, ok bool) string {
 		st := t.Val

@@ -356,13 +356,15 @@ type V5Acc struct {
 	realHas map[int64]bool
 	exitW   map[int64]string
 	// landing
-	land      map[string]*landAgg
-	landOrd   []string
-	cache     *V5Report
-	cacheVer  int64
-	cacheTape *ProbeTape
-	curTape   *ProbeTape                          // the tape the probes were priced on (nil = none)
-	flagFn    func(w int64, mint string) []string // the Filters report's flags of a fill (the view sets it)
+	land           map[string]*landAgg
+	landOrd        []string
+	cache          *V5Report
+	cacheVer       int64
+	cacheTape      *ProbeTape
+	curTape        *ProbeTape                          // the tape the probes were priced on (nil = none)
+	tr             trading                             // the trading state's records (trading.go)
+	brkThr, brkWin string                              // the breaker's spec (run_start presend_live.breaker "2:0.1:30:60")
+	flagFn         func(w int64, mint string) []string // the Filters report's flags of a fill (the view sets it)
 }
 
 func newV5Acc() *V5Acc {
@@ -376,7 +378,7 @@ var v5Evs = map[string]bool{"presend_live_dip46": true, "presend_live_ledger_mod
 	"presend_live_probe_land": true, "presend_live_probe_end": true, "presend_live_probe_filled": true, "presend_live_filter_ab": true,
 	"presend_live_arm": true, "presend_live_skip": true, "presend_live_rearm_defer": true, "presend_live_fill": true, "presend_live_realized": true,
 	"presend_live_exit": true, "presend_live_filter_state": true, "presend_live_grpsign": true, "presend_live_rearm_fleet": true,
-	"presend_live_funder": true, "presend_attempt_land": true, "run_end": true}
+	"presend_live_funder": true, "presend_attempt_land": true, "run_end": true, "presend_live_breaker": true, "run_start": true, "presend_live_stop": true}
 
 var (
 	v5MsFirst = `"ms_send_to_first_rx":`
@@ -437,7 +439,12 @@ func (A *V5Acc) feed(ev, line []byte) {
 	}
 	A.bump()
 	w := mW(o)
+	A.tradeFeed(e, o)
 	switch e {
+	case "run_start":
+		if pl := mObj(o, "presend_live"); pl != nil {
+			A.brkThr, A.brkWin = rxBreakerSpec(anyStr(pl["breaker"]))
+		}
 	case "presend_live_dip46":
 		A.d46 = true
 		cfg := mObj(o, "cfg")

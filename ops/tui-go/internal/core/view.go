@@ -597,6 +597,9 @@ type View struct {
 	Added []string   // v4: the ADDED WINDOWS lines (dip41 / dip42 log-only windows; nil when none)
 	D43   *D43Report // v4: the dip43 sections (nil when the run has no dip43 record)
 	V5    *V5Report  // v5: the dip46 / dip47 sections and the run-wide stats (nil only with DIPMON_V3)
+	// v5 (11-12): the real trading state while running ("" = buying), its severity and every blocking state (trading.go)
+	TradeState, TradeSev string
+	Blocks               []Block
 }
 
 // NowNS is now_ns as a float.
@@ -982,9 +985,7 @@ func BuildView(ctx *Ctx, scope int) *View {
 	v.Added = M.Add.Lines()
 	M.V5.flagFn = func(w int64, mint string) []string { return filtFlags(v.Filt, w, mint) }
 	v.V5 = M.V5.Report(int64(ctx.Now()*1e9), ctx.ProbeTape, ctx.Multi)
-	if v.V5 != nil && v.V5.Pause != nil && v.V5.Pause.Active && v.Running {
-		v.Alerts = append(v.Alerts, Alert{"warn", "PAUSE window " + v.V5.Pause.Window + ": no new arms (dip47)"})
-	}
+	v.TradeState, v.TradeSev, v.Blocks = TradingState(v, M, v.Cur, int64(ctx.Now()*1e9))
 	return v
 }
 

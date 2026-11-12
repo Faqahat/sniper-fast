@@ -42,6 +42,12 @@ every v4 screen, `--snapshot` and `--json` byte-identical to v4 on r82; only the
   fleet (live)` (counted, no value: re-arm windows have no shadow; the pause has no record per trigger); LOG rows (registry)
   `group at signing (log)` and `re-arm fleet (log)` (**measured** on the real fills). Shown only once they acted / a fill carries
   the field.
+- **The real trading state (11-12, after r85)** (`internal/core/trading.go`): while the run is RUNNING the header (and the RUN
+  panel, Health's `trading` line, the snapshot's `trading` line) shows what the engine really does, in colour: `PAUSED: breaker
+  until 6:35 AM` (presend_live_breaker: trip at the record's arrival, + pause_min; ends early at the control key's `breaker`
+  live -> log: "breaker → log at 6:23 AM"), `PAUSED: pause window` / `PAUSED: manual` (dip47), `PAUSED: fee budget`,
+  `STOPPING: profit lock / kill switch / run_stopping` (log lines or presend_live_stop), `IDLE (no arms in N min)` (dip43+ runs,
+  nothing armed for >= 15 min). A line under the header lists every blocking state with its time left. Ended runs: as v4.
 - **Filters rows follow each filter's mode (fix, r84)**: the run's live / log history per switchable filter (run_start
   `presend_live.dip43` `*_live`, `presend_live_dip43`, `presend_live_ledger_mode` `dip43` / `dip47` keys, the dip47 filter state,
   `presend_live_fpnb_strict.live`). A LIVE mint ledger / fan-out is a LIVE row (`mint ledger [live]`: its T2 skips, calibrated);

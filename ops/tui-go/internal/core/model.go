@@ -738,7 +738,8 @@ func (M *Model) feedOne(line, ev []byte) {
 	M.Filt.feed(ev, line) // the Filters tab (its own presend_* records, before the model ignores the shadow's)
 	M.Add.feed(ev, line)  // v4: the added windows (dip41 / dip42)
 	M.D43.feed(ev, line)  // v4: the dip43 records (guard, CURVE band, true balances, fee tier, exits, shadows)
-	M.V5.feed(ev, line)   // v5: dip46 probes / A/B, dip47 filter state / pause / re-arm cap / fleet / GRPSIGN / funder; hours, landing
+	M.V5.tr.curT = M.CurT
+	M.V5.feed(ev, line) // v5: dip46 probes / A/B, dip47 filter state / pause / re-arm cap / fleet / GRPSIGN / funder; hours, landing
 	switch string(ev) {
 	case "presend_live_sell_land": // v3 only: a landed pre-send sell (ignored by the Python v1)
 		M.jPSSellLand(line)

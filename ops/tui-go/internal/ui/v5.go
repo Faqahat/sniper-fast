@@ -101,3 +101,63 @@ func (m *Model) v5Of(tr *core.Trade) *core.V5Fill {
 
 // fvOn: the Trades table's fv column (dip47 runs: the fills carry the filter state's version).
 func (m *Model) fvOn() bool { return m.view != nil && m.view.V5 != nil && m.view.V5.FvOn }
+
+// blocksLine: one line under the header with every state that blocks new buys now ("" = none: the header as in v4).
+func (m *Model) blocksLine(w int) string {
+	v := m.view
+	if v == nil || len(v.Blocks) == 0 {
+		return ""
+	}
+	t := m.th
+	var ps []string
+	for _, b := range v.Blocks {
+		st := t.Bad
+		switch b.Sev {
+		case "warn":
+			st = t.Warn
+		case "info":
+			st = t.Lbl
+		}
+		ps = append(ps, st.Render(b.Text))
+	}
+	l := " " + t.Warn.Bold(true).Render(m.g("⏸", "||")) + " " + strings.Join(ps, t.Dim.Render(" "+m.g("·", "|")+" "))
+	return ansi.Truncate(l, w, m.g("…", "~"))
+}
+
+// tradingKV: the Health tab's trading line (running runs only).
+func (m *Model) tradingKV() string {
+	v := m.view
+	if v == nil || !v.Running {
+		return ""
+	}
+	t := m.th
+	if len(v.Blocks) == 0 {
+		return m.kv("trading", 10, t.Good.Render("buying enabled (no breaker / pause / fee-budget pause / stop)"))
+	}
+	var ps []string
+	for _, b := range v.Blocks {
+		st := t.Bad
+		if b.Sev == "warn" {
+			st = t.Warn
+		} else if b.Sev == "info" {
+			st = t.Lbl
+		}
+		ps = append(ps, st.Render(b.Text))
+	}
+	return m.kv("trading", 10, strings.Join(ps, t.Dim.Render(" · ")))
+}
+
+// statusDot: the run status' dot and text; while running, the real trading state instead of RUNNING (v5).
+func (m *Model) statusDot() (string, string) {
+	t, v := m.th, m.view
+	dot := t.StateDot(StatusState(v.Status), m.ascii)
+	st := t.StatusStyle(v.Status).Render(v.Status)
+	if v.TradeState != "" {
+		ts, dst := t.Bad.Bold(true), "off"
+		if v.TradeSev == "warn" {
+			ts, dst = t.Warn.Bold(true), "part"
+		}
+		dot, st = t.StateDot(dst, m.ascii), ts.Render(v.TradeState)
+	}
+	return dot, st
+}

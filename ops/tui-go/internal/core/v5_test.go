@@ -236,3 +236,28 @@ func TestFilterModes(t *testing.T) {
 		t.Fatal("a LIVE row on a log-only run")
 	}
 }
+
+// TestTradingState (r85): the breaker's pause shows until its end, ends early on the control key's switch to log, then IDLE.
+func TestTradingState(t *testing.T) {
+	M := NewModel(0, 100)
+	feed := func(r string) { M.FeedJSONL([][]byte{[]byte(r)}) }
+	feed(`{"ev":"run_start","t":1794441900000000000,"presend_live":{"breaker":"2:0.1:30:60"}}`)
+	feed(`{"ev":"dump","t":1794441940000000000}`)
+	feed(`{"ev":"presend_live_arm","w":1,"kind":"t2","trig":{"sig":"S","mint":"M","t":1794443700000000000}}`)
+	feed(`{"ev":"dump","t":1794443747000000000}`)
+	feed(`{"ev":"presend_live_breaker","last_mint":"4h9QNMRirGeXMScgBPY9DaQy5BqseWrhU4aVPHgepump","last_pnl":-137557522,"losses":2,"pause_min":60,"trips":1}`)
+	S := M.Sess(0)
+	v := &View{Running: true, Status: "RUNNING", Cur: S, D43: &D43Report{}}
+	st, sev, bl := TradingState(v, M, S, 1794444000000000000) // 5:40 AM
+	if st != "PAUSED: breaker until 6:35 AM" || sev != "bad" || len(bl) != 1 || !strings.Contains(bl[0].Text, "56 min left") {
+		t.Fatalf("paused: %q %q %+v", st, sev, bl)
+	}
+	feed(`{"ev":"presend_live_ledger_mode","ok":true,"dip43":{"breaker":"log"},"was":{"dip43":{"breaker":"live"}},"t":1794446617996460147}`)
+	st, _, bl = TradingState(v, M, S, 1794446640000000000) // 6:24 AM
+	if !strings.HasPrefix(st, "IDLE") || !strings.Contains(TradingLine(bl), "breaker → log at 6:23 AM") {
+		t.Fatalf("after log: %q %v", st, TradingLine(bl))
+	}
+	if st, _, _ := TradingState(&View{Running: false, Cur: S}, M, S, 1794444000000000000); st != "" {
+		t.Fatal("an ended run has no trading state")
+	}
+}

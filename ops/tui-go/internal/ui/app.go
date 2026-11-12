@@ -1017,6 +1017,9 @@ func (m *Model) render(w, h int) string {
 		return m.splash(w, h)
 	}
 	head := m.header(w, h)
+	if bl := m.blocksLine(w); bl != "" { // v5: every state that blocks new buys now, with its time left
+		head += "\n" + bl
+	}
 	hh := lines(head)
 	tabs := m.tabBar(w)
 	m.tabY = hh
@@ -1163,8 +1166,7 @@ func (m *Model) header(w, h int) string {
 		}
 	}
 	label += " " + m.g("·", "|") + " " + v.Build
-	dot := t.StateDot(StatusState(v.Status), m.ascii)
-	st := t.StatusStyle(v.Status).Render(v.Status)
+	dot, st := m.statusDot()
 	clock := core.T12(float64(m.now().UnixNano()), true)
 	if m.ctx.FixedNow != 0 {
 		clock = core.T12(m.ctx.FixedNow*1e9, true)

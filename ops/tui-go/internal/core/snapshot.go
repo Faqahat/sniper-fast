@@ -340,6 +340,12 @@ func SnapshotText(v *View, ctx *Ctx, width int) string {
 		end = " (" + v.HowEnded + ")"
 	}
 	out = append(out, "dipmon snapshot  "+region+"  ("+v.Build+")  "+v.Status+end)
+	if v.TradeState != "" { // v5: the real trading state (breaker / pause / fee budget / stop / idle)
+		out = append(out, "trading   "+v.TradeState)
+	}
+	for _, b := range v.Blocks {
+		out = append(out, "          "+b.Text)
+	}
 	out = append(out, "files     "+ctx.Src.JSONL+" (+ .log)  "+F(float64(ctx.Src.TJ.Size)/1e6, 1)+" MB + "+F(float64(ctx.Src.TL.Size)/1e6, 1)+" MB")
 	plan := ""
 	if v.Planned.Truthy() {

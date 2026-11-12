@@ -263,8 +263,8 @@ func (m *Model) runLines(cw int) []string {
 	t := m.th
 	v := m.view
 	var out []string
-	dot := t.StateDot(StatusState(v.Status), m.ascii)
-	l1 := dot + " " + t.StatusStyle(v.Status).Render(v.Status)
+	dot, stt := m.statusDot()
+	l1 := dot + " " + stt
 	if v.HowEnded != "" {
 		l1 += t.Lbl.Render("  " + v.HowEnded)
 	}
@@ -1096,7 +1096,8 @@ func (m *Model) overviewNarrow(w, bh int) string {
 	var out []string
 	rl := m.runLines(w)
 	// the status and start -> end in one line (how it ended is in the end banner)
-	st := t.StateDot(StatusState(v.Status), m.ascii) + " " + t.StatusStyle(v.Status).Render(v.Status) + "  "
+	sd, stt := m.statusDot()
+	st := sd + " " + stt + "  "
 	if x := st + rl[1]; ansi.StringWidth(x) <= w {
 		out = append(out, x)
 	} else {
