@@ -20,6 +20,7 @@
 //      grp_t2          log | live       dip47 GRPSIGN as an ARM-TIME T2 skip (never re-arm / wide); needs --presend-live-grpsign-log on
 //      grp_t2_pct      1..20 (3.0)      its threshold (% of supply)
 //      grx / grx_pct / grx_exit_slots   dip50 GRX (psgrx50.rs): log | live, 1..20 (2.245), 1..5 (1); need --presend-live-grx on
+//      probe_filters / probe_rearm      dip50 probe selection (psprobe46.rs): "all" | names | "all,-name"; on | off; need --presend-live-probe on
 //      grp_t2_whale    out | in (out)   the trigger whale counted in the group (r82: the whale is a member in 48 of 105 T2 fills; "in" skips ~55% of T2)
 // B) FILTER STATE: one versioned object of every hot key (old and new), the decisive start-only settings; `fv` bumps on every change,
 //    `fh` = its hash. presend_live_filter_state {fv, fh, state, changed: {key: [old, new]}, src} at start (fv 0) and on every change, with a
@@ -33,8 +34,10 @@ pub const KEYS: [&str; 26] = ["rival_gate", "rival_gate_spec", "fresh_skip_ra_de
 
 /// dip50 GRX's keys (psgrx50.rs): read, applied and in the filter state only with --presend-live-grx on (off: dip49c's state / hash)
 pub const KEYS50: [&str; 3] = ["grx", "grx_pct", "grx_exit_slots"];
+/// dip50 probe selection (psprobe46.rs): need --presend-live-probe on; in the filter state only once a flag / key of theirs is in use
+pub const KEYS50P: [&str; 2] = ["probe_filters", "probe_rearm"];
 /// every key the control file may carry
-pub fn all_keys() -> impl Iterator<Item = &'static str> { KEYS.iter().chain(KEYS50.iter()).copied() }
+pub fn all_keys() -> impl Iterator<Item = &'static str> { KEYS.iter().chain(KEYS50.iter()).chain(KEYS50P.iter()).copied() }
 
 /// the new keys' values (Copy; the start value of each = its flag)
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,6 +85,10 @@ pub struct Vals {
     pub grx_live: bool,
     pub grx_pct: f64,
     pub grx_slots: u64,
+    /// dip50 probes: --presend-live-probe on (off: the keys are ignored), the filters excluded (0 = all), re-arm probes
+    pub probe_on: bool,
+    pub pf_excl: u64,
+    pub probe_rearm: bool,
 }
 
 /// "T2:RA" (each 0 = off, or 5..90 % of supply)
@@ -162,6 +169,9 @@ impl Vals {
             grx_live: c.grx_live,
             grx_pct: c.grx_pct,
             grx_slots: c.grx_slots,
+            probe_on: c.p46.probe,
+            pf_excl: c.p46.filt_excl,
+            probe_rearm: c.p46.rearm,
         }
     }
     /// each key's value as the records show it
@@ -197,6 +207,8 @@ impl Vals {
             "grx" => if !self.grx_on { "off".into() } else { (if self.grx_live { "live" } else { "log" }).into() },
             "grx_pct" => if self.grx_on { json!(self.grx_pct) } else { serde_json::Value::Null },
             "grx_exit_slots" => if self.grx_on { json!(self.grx_slots) } else { serde_json::Value::Null },
+            "probe_filters" => if self.probe_on { psprobe46::filters_str(self.pf_excl).into() } else { serde_json::Value::Null },
+            "probe_rearm" => if self.probe_on { (if self.probe_rearm { "on" } else { "off" }).into() } else { serde_json::Value::Null },
             _ => serde_json::Value::Null,
         }
     }
@@ -322,6 +334,11 @@ pub fn key_apply(k: &str, x: &serde_json::Value, start: &Vals, v: &mut Vals) -> 
                 }
             }
         }
+        "probe_filters" | "probe_rearm" => {
+            if !start.probe_on { return Err(format!("ignored: needs {} on at start", psprobe46::FLAG_PROBE)); }
+            if k == "probe_filters" { v.pf_excl = psprobe46::filters_parse(text(x)?)?; }
+            else { v.probe_rearm = match text(x)? { "on" => true, "off" => false, s => return Err(format!("'{s}' (on | off)")) }; }
+        }
         _ => return Err("unknown key".into()),
     }
     Ok(())
@@ -358,7 +375,8 @@ fn copy_key(k: &str, from: &Vals, to: &mut Vals) {
         "rearm_max_per_mint" => to.rearm_cap = from.rearm_cap, "pause_window" => { to.pause = from.pause; to.pause_n = from.pause_n; } "pause_now" => to.pause_now = from.pause_now,
         "rearm_fleet" => to.rf_live = from.rf_live, "fresh_skip" => to.fresh_live = from.fresh_live,
         "rival_gate" => to.rg_live = from.rg_live, "rival_gate_spec" => to.rg = from.rg, "fresh_skip_ra_def" => to.fresh_ra_f1 = from.fresh_ra_f1, "fresh_skip_spec" => to.fresh = from.fresh, "rearm_fleet_spec" => to.rf = from.rf,
-        "grx" => to.grx_live = from.grx_live, "grx_pct" => to.grx_pct = from.grx_pct, "grx_exit_slots" => to.grx_slots = from.grx_slots, _ => {}
+        "grx" => to.grx_live = from.grx_live, "grx_pct" => to.grx_pct = from.grx_pct, "grx_exit_slots" => to.grx_slots = from.grx_slots,
+        "probe_filters" => to.pf_excl = from.pf_excl, "probe_rearm" => to.probe_rearm = from.probe_rearm, _ => {}
     }
 }
 
@@ -512,6 +530,7 @@ impl PsLive {
         self.sh.rg.set(s.rg, s.rg_slots, s.rg_live);
         if let Some(p) = self.cfg.ledger_ctl.clone() {
             self.line(format!("DIP47 CONTROL KEYS ({p}): {} (absent = the start flag; bad = the old value stays)", KEYS.iter().copied().collect::<Vec<_>>().join(", ")));
+            if self.cfg.p46.probe && self.cfg.p46.d50 { self.line(format!("DIP50 CONTROL KEYS ({p}): {} (need --presend-live-probe on)", KEYS50P.join(", "))); }
             if self.cfg.grx { self.line(format!("DIP50 CONTROL KEYS ({p}): {} (absent = the start flag; bad = the old value stays)", KEYS50.join(", "))); }
             self.f47.ctl = Some((p, None, Instant::now()));
             self.ctl47_check(true);
@@ -576,6 +595,12 @@ impl PsLive {
         // the re-arm fleet rule: the sender reads these atomics
         self.sh.rf.set(v.rf, v.rf_live);
         self.sh.rg.set(v.rg, v.rg_slots, v.rg_live);
+        // dip50 probe selection (the sender and the main loop read these atomics; nothing moves with probes off)
+        if v.probe_on {
+            self.sh.p46.excl.store(v.pf_excl, Ordering::SeqCst);
+            self.sh.p46.rearm.store(v.probe_rearm, Ordering::SeqCst);
+            if old.is_some_and(|o| o.probe_rearm) && !v.probe_rearm { self.p46_rearm_off(); }
+        }
         let fr = self.cfg.g43.as_ref().is_some_and(|g| g.floor_rearm);
         let sender = (self.cfg.bd, self.cfg.g43.as_ref().and_then(|g| g.curve_deep), fr);
         let was = old.map(|o| (o.bd, o.curve, o.floors));
@@ -651,6 +676,8 @@ impl PsLive {
         for k in KEYS.iter() { put(k, v.get(k)); }
         // dip50 GRX: only when on (off: dip49c's state, its hash unchanged)
         if self.cfg.grx { for k in KEYS50.iter() { put(k, v.get(k)); } }
+        // dip50 probe selection: only once in use (a flag given, or a key moved a value off its default)
+        if self.cfg.p46.probe && (self.cfg.p46.d50 || v.pf_excl != 0 || v.probe_rearm) { for k in KEYS50P.iter() { put(k, v.get(k)); } }
         put("grpsign_log", self.cfg.grpsign.into());
         put("fleet_log", self.cfg.fleet.is_some().into());
         put("funder_log", self.cfg.funder_log.into());

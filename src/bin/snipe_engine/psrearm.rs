@@ -370,6 +370,8 @@ impl PsLive {
             // dip34 (log-only, --presend-live-ann on): the holders check's skips get "ann" too (the creator's holding: cr_hold / cr_big)
             if self.cfg.ann { x["ann"] = ann_arm(&self.det, &self.user, &mint, slot); }
             self.rearm_skip(w, &mint, &c.dump, x);
+            // dip50 (probe_rearm on; nothing otherwise): a filter's skip gets a probe window
+            if self.cfg.p46.probe { self.p46_skip_rearm(w, mint, &c.dump, launch.as_ref(), slot); }
             // dip34 seen (log-only): a rearm_cr_loss skip's dumper into the seen book (nothing without --presend-live-seen-log)
             self.seen_note(w, c.dump.tr.user, t_rx, mint);
             return;
@@ -405,9 +407,13 @@ impl PsLive {
                 let mut ex = serde_json::json!({"fresh": x.0, "fresh_n": x.1, "thr": x.2, "check_slot": chk_slot});
                 if let Some(j) = ex49 { ex["fresh_def"] = j; }
                 self.rearm_skip("fresh_holders", &mint, &dump, ex);
+                // dip50 (probe_rearm on; nothing otherwise): the skip's probe window ("rearm_fresh_holders")
+                if self.cfg.p46.probe { self.p46_skip_rearm("fresh_holders", mint, &dump, Some(&launch), chk_slot); }
                 return;
             }
         }
+        // dip50: a re-arm probe window on the token ends (the real window takes over; nothing without one)
+        if !self.p46.by_mint.is_empty() { self.p46_real_rearm(&mint); }
         let (k, drop, dry) = (self.cfg.k, self.cfg.drop, self.cfg.dry);
         // the holders when a waiting window arms (the record's "holders" are the check's: the paper's)
         let holders_arm = deferred.map(|_| self.det.holders_at_least(&mint, RE_BIG, &self.user).unwrap_or_default());

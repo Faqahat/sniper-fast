@@ -30,8 +30,8 @@ pub const FLAG_KINDS: &str = "--presend-live-probe-kinds";
 pub const FLAG_MAXWIN: &str = "--presend-live-probe-max-windows";
 pub const FLAG_AB: &str = "--presend-live-filter-ab";
 /// every dip46 flag (each needs --presend-live)
-pub const P46FLAGS: [&str; 5] = ["--presend-live-probe", "--presend-live-probe-max-per-sec", "--presend-live-probe-kinds", "--presend-live-probe-max-windows",
-    "--presend-live-filter-ab"];
+pub const P46FLAGS: [&str; 7] = ["--presend-live-probe", "--presend-live-probe-max-per-sec", "--presend-live-probe-kinds", "--presend-live-probe-max-windows",
+    "--presend-live-filter-ab", "--presend-live-probe-filters", "--presend-live-probe-rearm"];
 
 /// the probe's min_tokens_out: no bonding curve holds u64::MAX tokens, so pump's buy can never meet it (the try fails, nothing is bought)
 pub const PROBE_MIN_OUT: u64 = u64::MAX;
@@ -57,9 +57,67 @@ pub fn kind_of(why: &str) -> Option<&'static str> {
         w if w.starts_with("s1_") => Some("s1"),
         // dip48: the fresh-holders arm-time skip (its bit is the last one; arm-time)
         "fresh_holders" => Some("fresh_holders"),
+        // dip50: the re-arm probes' kinds (outside KINDS: the kinds mask never applies to them)
+        "rearm_fleet_withheld" => Some("rearm_fleet"),
+        "rearm_r5" => Some("rearm_r5"), "rearm_holder_loss" => Some("rearm_holder_loss"), "rearm_wh_loss" => Some("rearm_wh_loss"), "rearm_blocklist" => Some("rearm_blocklist"),
+        "rearm_fresh_holders" => Some("rearm_fresh_holders"), "rearm_m2_unseen" => Some("rearm_m2_unseen"), "rearm_cap" => Some("rearm_cap"),
         w => KINDS[..15].iter().find(|k| **k == w && **k != "s1").copied(),
     }
 }
+// ---- dip50: PROBE FILTER SELECTION (--presend-live-probe-filters / key probe_filters) + RE-ARM PROBES (--presend-live-probe-rearm / key
+// probe_rearm). Defaults (all, off) = dip49c's probes exactly.
+pub const FLAG_FILTERS: &str = "--presend-live-probe-filters";
+pub const FLAG_REARM: &str = "--presend-live-probe-rearm";
+/// the selectable filter names = the probe records' `filter` values ("s1" = every s1_* skip; the *_stale withholds under their plain
+/// name). Bit i = FILTERS[i]. rival_gate_withheld is accepted but nothing probes it (dip49: a rival-gate withhold is never a probe)
+pub const FILTERS: [&str; 29] = ["create_slot", "young_age", "quiet", "quiet3_a", "lone_whale", "cr_loss", "cr_unfollowed", "wh_loss", "holder_loss", "blocklist",
+    "m2_unseen", "mint_ledger", "fanout", "s1", "breaker", "fresh_holders", "fpnb_withheld", "skip2_withheld", "blocklist_withheld", "botdepth_withheld",
+    "rival_gate_withheld", "rearm_fleet_withheld", "rearm_r5", "rearm_holder_loss", "rearm_wh_loss", "rearm_blocklist", "rearm_fresh_holders", "rearm_m2_unseen", "rearm_cap"];
+pub const N_FILTERS: usize = FILTERS.len();
+/// the re-arm skip reasons that get a probe window with probe_rearm on (rearm_check / rearm_arm): the filter's name
+pub fn rearm_filter(why: &str) -> Option<&'static str> {
+    match why {
+        "rearm_r5" => Some("rearm_r5"), "rearm_holder_loss" => Some("rearm_holder_loss"), "rearm_wh_loss" => Some("rearm_wh_loss"), "rearm_blocklist" => Some("rearm_blocklist"),
+        "rearm_m2_unseen" => Some("rearm_m2_unseen"), "rearm_cap" => Some("rearm_cap"), "fresh_holders" | "rearm_fresh_holders" => Some("rearm_fresh_holders"),
+        _ => None,
+    }
+}
+/// a skip / withhold reason's filter name (None: not selectable)
+pub fn filter_name(why: &str) -> Option<&'static str> {
+    let n = match why {
+        "fpnb_withheld_stale" => "fpnb_withheld", "skip2_withheld_stale" => "skip2_withheld",
+        w if w.starts_with("s1_") => "s1",
+        w => w,
+    };
+    FILTERS[..N_FILTERS].iter().find(|k| **k == n).copied()
+}
+pub fn filter_bit(why: &str) -> u64 { filter_name(why).and_then(|n| FILTERS.iter().position(|x| *x == n)).map_or(0, |i| 1u64 << i) }
+pub const FILTERS_ALL: u64 = (1u64 << N_FILTERS) - 1;
+/// "all" | a comma list of names; "-name" takes one out (left to right: "all,-create_slot"). -> the EXCLUDED set (0 = all)
+pub fn filters_parse(s: &str) -> std::result::Result<u64, String> {
+    let mut on = 0u64;
+    let mut any = false;
+    for k in s.split(',').map(str::trim).filter(|k| !k.is_empty()) {
+        any = true;
+        if k == "all" { on = FILTERS_ALL; continue; }
+        let (neg, name) = match k.strip_prefix('-') { Some(n) => (true, n), None => (false, k) };
+        let b = if FILTERS[..N_FILTERS].contains(&name) { filter_bit(name) } else { 0 };
+        if b == 0 { return Err(format!("unknown filter '{name}' (all | {}; -name excludes)", FILTERS[..N_FILTERS].join(" | "))); }
+        if neg { on &= !b; } else { on |= b; }
+    }
+    if !any { return Err("empty list (all | names; -name excludes)".into()); }
+    if on == 0 { return Err("no filter left (use probe46 off to stop every probe)".into()); }
+    Ok(FILTERS_ALL & !on)
+}
+/// the canonical text of an excluded set: "all", "all,-a,-b" (few out) or the names in
+pub fn filters_str(excl: u64) -> String {
+    let excl = excl & FILTERS_ALL;
+    if excl == 0 { return "all".into(); }
+    let names = |m: u64| FILTERS[..N_FILTERS].iter().enumerate().filter(|(i, _)| m & (1u64 << i) != 0).map(|(_, k)| *k).collect::<Vec<_>>();
+    if excl.count_ones() as usize <= N_FILTERS / 2 { format!("all,{}", names(excl).iter().map(|n| format!("-{n}")).collect::<Vec<_>>().join(",")) }
+    else { names(FILTERS_ALL & !excl).join(",") }
+}
+
 pub fn kind_bit(k: &str) -> u32 { KINDS.iter().position(|x| *x == k).map_or(0, |i| 1 << i) }
 
 pub fn kinds_parse(s: &str) -> Result<u32> {
@@ -124,6 +182,10 @@ pub struct Cfg46 {
     pub ab_flag: bool,
     /// the start A/B set
     pub ab: u32,
+    /// dip50: the filters EXCLUDED from probes (0 = all, dip49c), re-arm probes on, either flag given
+    pub filt_excl: u64,
+    pub rearm: bool,
+    pub d50: bool,
 }
 impl Cfg46 {
     pub fn parse(argv: &[String]) -> Result<Cfg46> {
@@ -131,18 +193,23 @@ impl Cfg46 {
         let arg = |f: &str| argv.iter().position(|x| x == f).and_then(|i| argv.get(i + 1)).cloned();
         for f in P46FLAGS { if has(f) && arg(f).is_none_or(|v| v.starts_with("--")) { bail!("{f} needs a value"); } }
         let probe = match arg(FLAG_PROBE).as_deref() { None | Some("off") => false, Some("on") => true, Some(x) => bail!("{FLAG_PROBE} {x}: on | off") };
-        if !probe { if let Some(f) = [FLAG_RATE, FLAG_KINDS, FLAG_MAXWIN].iter().find(|f| has(f)) { bail!("{f} needs {FLAG_PROBE} on"); } }
+        if !probe { if let Some(f) = [FLAG_RATE, FLAG_KINDS, FLAG_MAXWIN, FLAG_FILTERS, FLAG_REARM].iter().find(|f| has(f)) { bail!("{f} needs {FLAG_PROBE} on"); } }
+        let filt_excl = match arg(FLAG_FILTERS) { None => 0, Some(s) => filters_parse(&s).map_err(|e| anyhow::anyhow!("{FLAG_FILTERS} {s}: {e}"))? };
+        let rearm = match arg(FLAG_REARM).as_deref() { None | Some("off") => false, Some("on") => true, Some(x) => bail!("{FLAG_REARM} {x}: on | off") };
+        let d50 = has(FLAG_FILTERS) || has(FLAG_REARM);
         let rate = match arg(FLAG_RATE) { None => 5, Some(s) => s.parse::<u32>().ok().filter(|r| (1..=50).contains(r)).with_context(|| format!("{FLAG_RATE} {s}: 1..50 probes per second"))? };
         let kinds = match arg(FLAG_KINDS) { None => KINDS_ALL, Some(s) => kinds_parse(&s)? };
         let max_wins = match arg(FLAG_MAXWIN) { None => 8, Some(s) => s.parse::<usize>().ok().filter(|r| (1..=64).contains(r)).with_context(|| format!("{FLAG_MAXWIN} {s}: 1..64 probe windows at once"))? };
         let (ab_flag, ab) = match arg(FLAG_AB) { None => (false, 0), Some(s) => (true, ab_parse(&s)?) };
-        Ok(Cfg46 { probe, rate, kinds, max_wins, ab_flag, ab })
+        Ok(Cfg46 { probe, rate, kinds, max_wins, ab_flag, ab, filt_excl, rearm, d50 })
     }
     pub fn any(&self) -> bool { self.probe || self.ab_flag }
     pub fn json(&self) -> serde_json::Value {
         let mut j = serde_json::json!({});
         if self.probe { j["probe"] = serde_json::json!({"max_per_sec": self.rate, "kinds": kinds_str(self.kinds), "max_windows": self.max_wins, "min_out": PROBE_MIN_OUT}); }
         if self.ab_flag { j["filter_ab"] = ab_names(self.ab).into(); }
+        // dip50: only with its flags (off: dip49c's record)
+        if self.probe && self.d50 { j["probe"]["filters"] = filters_str(self.filt_excl).into(); j["probe"]["rearm"] = self.rearm.into(); }
         j
     }
 }
@@ -183,6 +250,9 @@ pub struct Sh46 {
     pub probe: AtomicBool,
     /// the A/B'd filters now (bits AB_*)
     pub ab: std::sync::atomic::AtomicU32,
+    /// dip50: the filters excluded from probes now (0 = none), re-arm probes on
+    pub excl: AtomicU64,
+    pub rearm: AtomicBool,
     pub sent: AtomicU64,
     pub dry: AtomicU64,
     /// probes not built / not sent, why (the probe's own map: never the real tries' not-sent counts)
@@ -202,7 +272,11 @@ impl Send46 {
     pub fn want(&mut self, sh: &Sh46, why: &'static str, w: u64, slot: u64, now: u64) -> Option<&'static str> {
         if !sh.probe.load(Ordering::Relaxed) { return None; }
         let k = kind_of(why)?;
-        if self.kinds & kind_bit(k) == 0 { return None; }
+        // (a dip50 re-arm kind has no bit: the kinds list never applies to it)
+        let kb = kind_bit(k);
+        if kb != 0 && self.kinds & kb == 0 { return None; }
+        // dip50: the filter taken out of the probes (one relaxed load; 0 = none)
+        if sh.excl.load(Ordering::Relaxed) & filter_bit(why) != 0 { return None; }
         if self.last.get(&w) == Some(&slot) { return None; }
         if !self.bucket.try_take(now) { refused(sh, "probe_rate"); return None; }
         if self.last.len() > 4096 { self.last.retain(|_, s| *s + 64 >= slot); }
@@ -210,8 +284,10 @@ impl Send46 {
         Some(why)
     }
     /// an arm-time probe window's try: the window's first in this slot and a global token
-    pub fn want_win(&mut self, sh: &Sh46, w: u64, slot: u64, now: u64) -> bool {
+    pub fn want_win(&mut self, sh: &Sh46, why: &'static str, w: u64, slot: u64, now: u64) -> bool {
         if !sh.probe.load(Ordering::Relaxed) { refused(sh, "probe_off"); return false; }
+        // dip50: its filter taken out since the window armed (0 = none: dip49c)
+        if sh.excl.load(Ordering::Relaxed) & filter_bit(why) != 0 { refused(sh, "probe_filter_off"); return false; }
         if self.last.get(&w) == Some(&slot) { return false; }
         if !self.bucket.try_take(now) { refused(sh, "probe_rate"); return false; }
         self.last.insert(w, slot);
@@ -247,7 +323,9 @@ pub struct X46 {
 
 /// an arm-time probe window (main loop)
 #[derive(Clone, Debug)]
-pub struct PWin { pub mint: Pk, pub whale: Pk, pub en_slot: u64, pub why: &'static str, pub trig_slot: u64, pub sent: u32, pub stop_at: Option<Instant> }
+pub struct PWin { pub mint: Pk, pub whale: Pk, pub en_slot: u64, pub why: &'static str, pub trig_slot: u64, pub sent: u32, pub stop_at: Option<Instant>,
+    /// dip50: a re-arm skip's probe window (stops as a re-arm window: the next >= 6% sell / no holder left)
+    pub rearm: bool }
 
 /// a probe's landing waiting for its record
 pub struct PLand { pub att: Att, pub res: String, pub err: String, pub fee: u64, pub slot: u64, pub idx: Option<u64>, pub t_rx: u64, pub at: Instant }
@@ -282,6 +360,10 @@ pub struct P46 {
     pub ab_st: std::collections::BTreeMap<&'static str, [u64; 3]>,
     pub ctl: Option<(String, Option<std::time::SystemTime>, Instant)>,
     pub ctl_changes: u64,
+    /// dip50: re-arm probe windows armed, probes registered on re-arm windows (probe windows + real re-arm windows' withheld tries), the
+    /// re-arm probe windows' ids (their landing records' kind)
+    pub ra_windows: u64, pub ra_probes: u64,
+    pub ra_ids: FxHashSet<u64>,
 }
 impl P46 {
     pub fn active(&self) -> bool { !self.atts.is_empty() || !self.wins.is_empty() || !self.lands.is_empty() }
@@ -298,6 +380,8 @@ impl PsLive {
         if !self.p46_on() { return; }
         self.sh.p46.probe.store(self.cfg.p46.probe, Ordering::SeqCst);
         self.sh.p46.ab.store(self.cfg.p46.ab, Ordering::SeqCst);
+        self.sh.p46.excl.store(self.cfg.p46.filt_excl, Ordering::SeqCst);
+        self.sh.p46.rearm.store(self.cfg.p46.rearm, Ordering::SeqCst);
         if let Some(p) = self.cfg.ledger_ctl.clone() { self.p46.ctl = Some((p, None, Instant::now())); self.p46_ctl_check(true); }
         self.rec(serde_json::json!({"ev": "presend_live_dip46", "cfg": self.cfg.p46.json(), "ab_now": ab_names(self.sh.p46.ab.load(Ordering::SeqCst)),
             "probe_now": self.sh.p46.probe.load(Ordering::SeqCst), "t": arbx::feeds::clock::now_ns()}));
@@ -308,6 +392,8 @@ impl PsLive {
         let mut v = Vec::new();
         v.push(if c.p46.probe { format!("DIP46 PROBE TRIES ON: a try a live filter blocks is sent as a probe that can never fill (min_out = u64::MAX); kinds {}, <= {}/s, one per window per slot, \
             <= {} probe windows at once; probe fees counted apart (never the fee budget)", kinds_str(c.p46.kinds), c.p46.rate, c.p46.max_wins) } else { "DIP46 PROBE TRIES off".into() });
+        if c.p46.probe && c.p46.d50 { v.push(format!("DIP50 PROBE SELECTION: filters {} (hot key probe_filters) | re-arm probes {} (hot key probe_rearm): a re-arm window skipped by rearm_r5 / rearm_holder_loss / rearm_wh_loss / rearm_blocklist / rearm_fresh_holders / rearm_m2_unseen / rearm_cap, or a re-arm try the fleet rule withholds, is probed like a skipped T2 window (same rate cap)",
+            filters_str(c.p46.filt_excl), if c.p46.rearm { "ON" } else { "off" })); }
         v.push(if c.p46.ab_flag { format!("DIP46 FILTER A/B ON: {} (odd T2 triggers / odd windows bypass the filter, even ones as today; control key \"ab46\")",
             if c.p46.ab == 0 { "no filter yet".to_string() } else { ab_names(c.p46.ab).join(", ") }) } else { "DIP46 FILTER A/B off".into() });
         v
@@ -319,6 +405,7 @@ impl PsLive {
         let k = a.x46.probe.and_then(kind_of).unwrap_or("?");
         self.p46.by_kind.entry(k).or_default().sent += 1;
         if let Some(w) = self.p46.wins.get_mut(&a.w) { w.sent += 1; }
+        if self.p46.ra_ids.contains(&a.w) || (a.w < PW0 && self.rearm_w(a.w)) { self.p46.ra_probes += 1; }
         let e = self.p46.keep.entry(a.mint).or_default(); *e = (*e).max(a.deadline + 8);
         self.p46.tape.entry(a.mint).or_default();
         self.p46.order.push_back((a.deadline, a.sig, Instant::now()));
@@ -372,6 +459,9 @@ impl PsLive {
             }
         }
         if let Some(&id) = self.p46.by_mint.get(&t.mint) {
+            // dip50: a re-arm probe window stops as a re-arm window does (rearm_trade: the next >= 6% sell / no holder >= 6% left)
+            if !t.buy && self.p46.wins.get(&id).is_some_and(|w| w.rearm && w.stop_at.is_none())
+                && (t.tok as i64 >= psrearm::RE_BIG || !self.det.any_holder(&t.mint, psrearm::RE_BIG, &self.user)) { self.p46_stop_soon(id); }
             let hs = self.g43_set(&t.mint);
             let mut g = self.sh.wins.lock().unwrap();
             if let Some(w) = g.iter_mut().find(|w| w.id == id) { w.vsol = t.vsol; w.vtok = t.vtok; w.fr = t.fr(); w.pos = t.pos(); w.g43 = hs; }
@@ -382,7 +472,12 @@ impl PsLive {
     pub(super) fn p46_whale_sell(&mut self, mint: &Pk, whale: &Pk) {
         let Some(&id) = self.p46.by_mint.get(mint) else { return };
         let Some(w) = self.p46.wins.get_mut(&id) else { return };
-        if w.whale != *whale || w.stop_at.is_some() { return; }
+        if w.rearm || w.whale != *whale || w.stop_at.is_some() { return; }
+        self.p46_stop_soon(id);
+    }
+    /// the probe window stops 30 ms from now (the sender's window too)
+    fn p46_stop_soon(&mut self, id: u64) {
+        let Some(w) = self.p46.wins.get_mut(&id) else { return };
         w.stop_at = Some(Instant::now() + Duration::from_millis(WHALE_SELL_MS));
         let stop_ns = arbx::fast::mono_ns() + WHALE_SELL_MS * 1_000_000;
         let mut g = self.sh.wins.lock().unwrap();
@@ -396,8 +491,57 @@ impl PsLive {
         if self.p46.by_mint.get(&w.mint) == Some(&id) { self.p46.by_mint.remove(&w.mint); }
         { let mut g = self.sh.wins.lock().unwrap(); g.retain(|x| x.id != id); }
         let e = self.p46.keep.entry(w.mint).or_default(); *e = (*e).max(self.sh.cur_slot() + self.cfg.deadline_slots + 4);
-        self.rec(serde_json::json!({"ev": "presend_live_probe_end", "w": id, "mint": b58(&w.mint), "why": why, "filter": w.why, "sent": w.sent, "trig_slot": w.trig_slot,
-            "en_slot": w.en_slot, "slot": self.sh.cur_slot(), "t": arbx::feeds::clock::now_ns()}));
+        let mut r = serde_json::json!({"ev": "presend_live_probe_end", "w": id, "mint": b58(&w.mint), "why": why, "filter": w.why, "sent": w.sent, "trig_slot": w.trig_slot,
+            "en_slot": w.en_slot, "slot": self.sh.cur_slot(), "t": arbx::feeds::clock::now_ns()});
+        if w.rearm { r["kind"] = "rearm".into(); }
+        self.rec(r);
+    }
+
+    /// dip50: a RE-ARM window skipped by filter `why` (rearm_check / rearm_arm's fresh-holders skip): a PROBE WINDOW like a skipped T2
+    /// trigger's, built as the re-arm window would have been (the re-arm size, its limit on the curve now, its last slot = dump slot + 3 +
+    /// gap, starting at once; one try per slot, the global probe rate). Only with probe_rearm on and the filter selected
+    pub(super) fn p46_skip_rearm(&mut self, why: &'static str, mint: Pk, dump: &psrearm::RDump, launch: Option<&Launch>, chk_slot: u64) {
+        if !self.cfg.p46.probe || !self.sh.p46.probe.load(Ordering::Relaxed) || !self.sh.p46.rearm.load(Ordering::Relaxed) { return; }
+        let Some(filter) = rearm_filter(why) else { return };
+        if self.sh.p46.excl.load(Ordering::Relaxed) & filter_bit(filter) != 0 { return; }
+        let Some((spend, gap)) = self.rm.as_ref().map(|r| (r.cfg.spend, r.cfg.gap)) else { return };
+        let refuse = if self.stopped.is_some() || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
+            else if self.p46.by_mint.contains_key(&mint) { Some("probe_window_on_mint") }
+            else if self.armed.contains_key(&mint) || self.pos.contains_key(&mint) || self.atas.contains_key(&mint) { Some("ours_on_mint") }
+            else if self.p46.wins.len() >= self.cfg.p46.max_wins { Some("max_windows") }
+            else { psrearm::launch_refusal(launch, self.allow_holder) };
+        if let Some(r) = refuse { *self.p46.win_refused.entry(r).or_default() += 1; return; }
+        let launch = launch.cloned().expect("checked");
+        self.p46.nw += 1;
+        let id = PW0 + self.p46.nw;
+        let en_slot = dump.tr.s + psrearm::RE_WAIT + gap;
+        let (vsol, vtok, fr, pos) = self.rm.as_ref().and_then(|r| r.cur.get(&mint).copied()).unwrap_or((dump.tr.vsol, dump.tr.vtok, dump.tr.fr(), dump.tr.pos()));
+        let st_ns = arbx::fast::mono_ns();
+        let slot_ns = arbx::feeds::entries::SLOT_US.load(Ordering::Relaxed) * 1_000;
+        let sw = SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, 1, slot_ns), n: 0, done: false, spend, rearm: true,
+            ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &mint, &dump.tr.user, &self.user), grd: Grd::default(), fpg: None, fab: None, blk: None, bd: None,
+            g43: self.g43_set(&mint), p46: Some(filter), rfl: Default::default(), rg: Default::default() };
+        self.sh.wins.lock().unwrap().push(sw);
+        self.p46.wins.insert(id, PWin { mint, whale: dump.tr.user, en_slot, why: filter, trig_slot: dump.tr.s, sent: 0, stop_at: None, rearm: true });
+        self.p46.by_mint.insert(mint, id);
+        self.p46.windows += 1;
+        self.p46.ra_windows += 1;
+        if self.p46.ra_ids.len() > 8192 { self.p46.ra_ids.clear(); }
+        self.p46.ra_ids.insert(id);
+        let mut d = VecDeque::new(); d.push_back((pos.0, pos.1, pos.2, vsol, vtok));
+        self.p46.tape.insert(mint, d);
+        let e = self.p46.keep.entry(mint).or_default(); *e = (*e).max(en_slot + self.cfg.deadline_slots + 4);
+        self.rec(serde_json::json!({"ev": "presend_live_probe_arm", "w": id, "mint": b58(&mint), "filter": filter, "kind": "rearm", "dump": dump.json(), "check_slot": chk_slot,
+            "en_slot": en_slot, "spend": spend, "drop": self.cfg.drop, "lim0": vsol as f64 / vtok.max(1) as f64 * (1.0 - self.cfg.drop), "t": arbx::feeds::clock::now_ns()}));
+    }
+    /// dip50: probe_rearm switched off: the re-arm probe windows end now
+    pub(super) fn p46_rearm_off(&mut self) {
+        let ids: Vec<u64> = self.p46.wins.iter().filter(|(_, w)| w.rearm).map(|(id, _)| *id).collect();
+        for id in ids { self.p46_end(id, "probe_rearm_off"); }
+    }
+    /// dip50: a real RE-ARM window armed on `mint`: its re-arm probe window ends (a T2 skip's probe window stays, as in dip49c)
+    pub(super) fn p46_real_rearm(&mut self, mint: &Pk) {
+        if let Some(&id) = self.p46.by_mint.get(mint) { if self.p46.wins.get(&id).is_some_and(|w| w.rearm) { self.p46_end(id, "superseded"); } }
     }
 
     /// a T2 trigger skipped by `why` (arm-time): a PROBE WINDOW when the kind is listed and the try could be built (launch accounts,
@@ -407,6 +551,8 @@ impl PsLive {
         if !self.cfg.p46.probe || !self.sh.p46.probe.load(Ordering::Relaxed) { return; }
         let Some(k) = kind_of(why) else { return };
         if self.cfg.p46.kinds & kind_bit(k) == 0 || K_SEND & kind_bit(k) != 0 { return; }
+        // dip50: the filter taken out of the probes (0 = none: dip49c)
+        if self.sh.p46.excl.load(Ordering::Relaxed) & filter_bit(why) != 0 { return; }
         let refuse = if self.stopped.is_some() || DIP_NO_FIRE.load(Ordering::Relaxed) { Some("stopped") }
             else if self.p46.by_mint.contains_key(&t.mint) { Some("probe_window_on_mint") }
             else if self.armed.contains_key(&t.mint) || self.pos.contains_key(&t.mint) || self.atas.contains_key(&t.mint) { Some("ours_on_mint") }
@@ -423,7 +569,7 @@ impl PsLive {
             n: 0, done: false, spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user), grd: Grd::default(),
             fpg: None, fab: None, blk: None, bd: None, g43: self.g43_set(&t.mint), p46: Some(why), rfl: Default::default(), rg: Default::default() };
         self.sh.wins.lock().unwrap().push(sw);
-        self.p46.wins.insert(id, PWin { mint: t.mint, whale, en_slot, why, trig_slot: t.s, sent: 0, stop_at: None });
+        self.p46.wins.insert(id, PWin { mint: t.mint, whale, en_slot, why, trig_slot: t.s, sent: 0, stop_at: None, rearm: false });
         self.p46.by_mint.insert(t.mint, id);
         self.p46.windows += 1;
         let mut d = VecDeque::new(); d.push_back((t.s, t.i, t.j, t.vsol, t.vtok));
@@ -479,7 +625,7 @@ impl PsLive {
         let a = &l.att;
         let filter = a.x46.probe.unwrap_or("?");
         let mut j = serde_json::json!({"ev": "presend_live_probe_land", "w": a.w, "n": a.n, "mint": b58(&a.mint), "sig": bs58::encode(&a.sig).into_string(), "filter": filter,
-            "kind": if a.w >= PW0 || !self.rearm_w(a.w) { "T2" } else { "rearm" }, "path": a.path, "client": a.client, "res": l.res, "err": l.err, "fee": l.fee,
+            "kind": if self.p46.ra_ids.contains(&a.w) || (a.w < PW0 && self.rearm_w(a.w)) { "rearm" } else { "T2" }, "path": a.path, "client": a.client, "res": l.res, "err": l.err, "fee": l.fee,
             "send_slot": a.slot, "deadline": a.deadline, "t_send": a.t_send, "would_limit": a.lim, "would_min_out": a.min_out_real(), "spend": a.x46.spend,
             "sign": [a.x46.sv, a.x46.st]});
         if let Some((s, ms)) = pl::ack_of(a.tag) { j["ack"] = s.into(); j["ack_ms"] = ms.into(); }
@@ -624,6 +770,13 @@ impl PsLive {
                 if self.sh.p46.probe.load(Ordering::Relaxed) { "on" } else { "OFF" }, self.sh.p46.sent.load(Ordering::Relaxed), self.sh.p46.dry.load(Ordering::Relaxed),
                 self.p46.landed, self.p46.unseen, wf, wf + wm, self.p46.fees as f64 / 1e9, self.p46.windows, self.p46.wins.len(), self.sh.p46.refused.lock().unwrap(),
                 if self.p46.impossible > 0 { format!(" | PROBE FILLED (impossible) {}", self.p46.impossible) } else { String::new() });
+            // dip50: the lanes and the selection (only with its flags / keys in use: dip49c's segment otherwise)
+            let (excl, ra) = (self.sh.p46.excl.load(Ordering::Relaxed), self.sh.p46.rearm.load(Ordering::Relaxed));
+            if self.cfg.p46.d50 || excl != 0 || ra || self.p46.ra_windows > 0 {
+                let reg: u64 = self.p46.by_kind.values().map(|k| k.sent).sum();
+                s += &format!(" | PROBE lanes: T2 windows {} probes {} / re-arm ({}) windows {} probes {}{}", self.p46.windows - self.p46.ra_windows, reg.saturating_sub(self.p46.ra_probes),
+                    if ra { "on" } else { "off" }, self.p46.ra_windows, self.p46.ra_probes, if excl != 0 { format!(" | filters {}", filters_str(excl)) } else { String::new() });
+            }
         }
         if self.cfg.p46.ab_flag {
             s += &format!(" | AB46 {:?}: triggers {} | live/bypass would-block, bypass armed {:?} | send bypasses {:?}", ab_names(self.sh.p46.ab.load(Ordering::Relaxed)), self.p46.ab_n,

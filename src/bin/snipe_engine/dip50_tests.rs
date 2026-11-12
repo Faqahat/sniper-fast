@@ -764,3 +764,182 @@ fn dip50_added_time() {
     assert!(off < 1_000.0 && on < 5_000.0 && ev < 20_000.0 && dq < 1_000.0);
     let _ = std::fs::remove_file(&ctl);
 }
+
+// ===================================================================================================================
+// dip50 PROBE SELECTION (--presend-live-probe-filters / probe_filters) and RE-ARM PROBES (--presend-live-probe-rearm / probe_rearm);
+// psprobe46.rs. The re-arm windows' end-to-end test is dip26_tests::dip50_rearm_probe_windows (the re-arm harness lives there).
+// ===================================================================================================================
+
+#[test]
+fn dip50_probe_filters_parse() {
+    use psprobe46::{filter_bit as fb, filters_parse as fp, filters_str as fs, FILTERS_ALL};
+    // all = nothing excluded (dip49c); a list = only those; -name takes one out of all; left to right
+    assert_eq!(fp("all"), Ok(0));
+    assert_eq!(fp("all,-create_slot"), Ok(fb("create_slot")));
+    assert_eq!(fp(" all , -create_slot , -quiet "), Ok(fb("create_slot") | fb("quiet")));
+    assert_eq!(fp("young_age,rearm_r5"), Ok(FILTERS_ALL & !(fb("young_age") | fb("rearm_r5"))));
+    assert_eq!(fp("all,-create_slot,create_slot"), Ok(0));
+    assert_eq!(fp("create_slot,all"), Ok(0));
+    // every record name is a filter name; the stale withholds and the s1_* skips under their plain names
+    for n in ["create_slot", "quiet", "lone_whale", "young_age", "holder_loss", "wh_loss", "blocklist", "mint_ledger", "fresh_holders", "cr_loss", "botdepth_withheld", "fpnb_withheld",
+        "rival_gate_withheld", "rearm_fleet_withheld", "blocklist_withheld", "skip2_withheld", "rearm_r5", "rearm_holder_loss", "rearm_wh_loss", "rearm_blocklist", "rearm_fresh_holders",
+        "rearm_m2_unseen", "rearm_cap"] {
+        assert!(fb(n) != 0 && fp(n).is_ok() && fp(&format!("all,-{n}")) == Ok(fb(n)), "{n}");
+    }
+    assert_eq!((fb("fpnb_withheld_stale"), fb("skip2_withheld_stale"), fb("s1_anything")), (fb("fpnb_withheld"), fb("skip2_withheld"), fb("s1")));
+    assert_eq!((fb("rearm_age"), fb("rearm_no_holder"), fb("rearm_blocked_position"), fb("stopped"), fb("nonsense")), (0, 0, 0, 0, 0));
+    let bits: Vec<u64> = psprobe46::FILTERS.iter().map(|n| fb(n)).collect();
+    assert!(bits.iter().all(|b| b.count_ones() == 1) && bits.iter().fold(0, |a, b| a | b) == FILTERS_ALL, "one bit each");
+    // refusals: unknown names, an empty list, nothing left
+    for bad in ["", ",", "nonsense", "all,-nonsense", "create-slot", "-create_slot", "all,-all", "rearm_age", "ALL"] { assert!(fp(bad).is_err(), "'{bad}'"); }
+    // the canonical text round-trips
+    for s in ["all", "all,-create_slot", "all,-create_slot,-quiet", "young_age,rearm_r5", "create_slot"] {
+        let e = fp(s).unwrap();
+        assert_eq!(fs(e), s);
+        assert_eq!(fp(&fs(e)), Ok(e));
+    }
+    // the re-arm skip reasons that get a probe window, and their names
+    assert_eq!(psprobe46::rearm_filter("fresh_holders"), Some("rearm_fresh_holders"));
+    for w in ["rearm_r5", "rearm_holder_loss", "rearm_wh_loss", "rearm_blocklist", "rearm_m2_unseen", "rearm_cap"] { assert_eq!(psprobe46::rearm_filter(w), Some(w)); }
+    for w in ["rearm_age", "rearm_no_holder", "rearm_gone", "rearm_untradeable", "rearm_blocked_stopped", "rearm_blocked_position", "rearm_blocked_ata_open", "rearm_blocked_inflight",
+        "rearm_blocked_launch", "rearm_blocked_live_armed", "rearm_blocked_rearm_armed", "rearm_blocked_reactive", "rearm_breaker", "rearm_log43", "rearm_cr_loss", "create_slot"] {
+        assert_eq!(psprobe46::rearm_filter(w), None, "{w}");
+    }
+}
+
+#[test]
+fn dip50_probe_flags() {
+    // defaults = dip49c: nothing excluded, re-arm probes off, the run_start record without the new fields
+    let c = cfg(&["--presend-live-probe", "on"]).unwrap().unwrap();
+    assert_eq!((c.p46.filt_excl, c.p46.rearm, c.p46.d50), (0, false, false));
+    assert!(c.json()["dip46"]["probe"].get("filters").is_none() && c.json()["dip46"]["probe"].get("rearm").is_none());
+    let c0 = cfg(&[]).unwrap().unwrap().p46;
+    assert_eq!((c0.probe, c0.filt_excl, c0.rearm, c0.d50), (false, 0, false, false));
+    let c = cfg(&["--presend-live-probe", "on", "--presend-live-probe-filters", "all,-create_slot", "--presend-live-probe-rearm", "on"]).unwrap().unwrap();
+    assert_eq!((c.p46.filt_excl, c.p46.rearm, c.p46.d50), (psprobe46::filter_bit("create_slot"), true, true));
+    assert_eq!((c.json()["dip46"]["probe"]["filters"].as_str(), c.json()["dip46"]["probe"]["rearm"].as_bool()), (Some("all,-create_slot"), Some(true)));
+    assert!(PsLive::banner46(&c).iter().any(|l| l.starts_with("DIP50 PROBE SELECTION: filters all,-create_slot") && l.contains("re-arm probes ON")));
+    assert!(!PsLive::banner46(&cfg(&["--presend-live-probe", "on"]).unwrap().unwrap()).iter().any(|l| l.contains("DIP50")));
+    // refusals: unknown names, bad values, the flags without probes
+    for bad in [vec!["--presend-live-probe", "on", "--presend-live-probe-filters", "all,-nonsense"], vec!["--presend-live-probe", "on", "--presend-live-probe-filters", "rearm_age"],
+        vec!["--presend-live-probe", "on", "--presend-live-probe-rearm", "yes"], vec!["--presend-live-probe-filters", "all"], vec!["--presend-live-probe-rearm", "on"],
+        vec!["--presend-live-probe", "off", "--presend-live-probe-rearm", "on"]] {
+        assert!(cfg(&bad).is_err(), "{bad:?}");
+    }
+    let known = src_flags("\"");
+    for f in [psprobe46::FLAG_FILTERS, psprobe46::FLAG_REARM] { assert!(known.contains(f) && D46FLAGS.contains(&f) && psprobe46::P46FLAGS.contains(&f), "{f}"); }
+    assert!(check_flags(&args(&["--presend-live-probe", "on", "--presend-live-probe-filters", "all,-create_slot", "--presend-live-probe-rearm", "on"])).is_ok());
+}
+
+/// the sender's limiter with the selection: an excluded filter never probes (per try and per probe window), the others as before; T2 and
+/// re-arm probes share the one global rate
+#[test]
+fn dip50_probe_send_limiter_selection() {
+    let c = cfg(&["--presend-live-probe", "on", "--presend-live-probe-max-per-sec", "2"]).unwrap().unwrap();
+    let sh = psprobe46::Sh46::default();
+    sh.probe.store(true, Ordering::SeqCst);
+    let mut s = psprobe46::Send46::new(&c.p46);
+    let ms = 1_000_000u64;
+    // default (nothing excluded): dip49c
+    assert_eq!(s.want(&sh, "botdepth_withheld", 1, 10, 0), Some("botdepth_withheld"));
+    // excluded: no probe, no token taken
+    sh.excl.store(psprobe46::filter_bit("botdepth_withheld") | psprobe46::filter_bit("create_slot"), Ordering::SeqCst);
+    assert_eq!(s.want(&sh, "botdepth_withheld", 2, 10, 600 * ms), None);
+    assert_eq!(s.want(&sh, "fpnb_withheld_stale", 2, 10, 600 * ms), Some("fpnb_withheld_stale"), "the others still probe (the token was not taken)");
+    // a probe window armed before its filter went out: its tries stop; another filter's window goes on
+    assert!(!s.want_win(&sh, "create_slot", psprobe46::PW0 + 1, 12, 1_200 * ms));
+    assert_eq!(sh.refused.lock().unwrap().get("probe_filter_off").copied(), Some(1));
+    assert!(s.want_win(&sh, "young_age", psprobe46::PW0 + 2, 12, 1_200 * ms));
+    // ONE rate for both lanes (2/s, burst 1): a re-arm probe window's try right after a T2 one waits; the fleet withhold's probe too
+    assert!(!s.want_win(&sh, "rearm_r5", psprobe46::PW0 + 3, 12, 1_201 * ms));
+    assert_eq!(s.want(&sh, "rearm_fleet_withheld", 7, 12, 1_202 * ms), None);
+    assert_eq!(sh.refused.lock().unwrap().get("probe_rate").copied(), Some(2));
+    assert!(s.want_win(&sh, "rearm_r5", psprobe46::PW0 + 3, 13, 1_800 * ms));
+    assert_eq!(s.want(&sh, "rearm_fleet_withheld", 7, 14, 2_400 * ms), Some("rearm_fleet_withheld"), "a re-arm kind is outside the kinds list");
+    // the kinds list still applies to the dip46 kinds; the re-arm names pass it
+    let c = cfg(&["--presend-live-probe", "on", "--presend-live-probe-kinds", "botdepth"]).unwrap().unwrap();
+    let sh = psprobe46::Sh46::default();
+    sh.probe.store(true, Ordering::SeqCst);
+    let mut s = psprobe46::Send46::new(&c.p46);
+    assert_eq!(s.want(&sh, "fpnb_withheld", 1, 10, 0), None);
+    assert_eq!(s.want(&sh, "rearm_fleet_withheld", 1, 10, 0), Some("rearm_fleet_withheld"));
+    assert_eq!((psprobe46::kind_of("rearm_fleet_withheld"), psprobe46::kind_of("rearm_cap"), psprobe46::kind_of("rearm_age")), (Some("rearm_fleet"), Some("rearm_cap"), None));
+}
+
+/// T2 skips: create_slot excluded -> no probe window for a create-slot skip while a young-age skip still gets one; the hot key puts it
+/// back; the keys' records, refusals and the filter state; the defaults arm both (dip49c)
+#[test]
+fn dip50_probe_filters_t2_and_keys() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    let pw = |p: &PsLive, m: &Pk| p.sh.wins.lock().unwrap().iter().find(|w| w.p46.is_some() && w.mint == *m).map(|w| w.p46.unwrap());
+    // a create-slot trigger (create and the whale in one slot) and a young one (the whale one slot after the create)
+    let two = |p: &mut PsLive, tag: u8, s: u64| -> (Launch, Launch) {
+        let (lc, ly) = (launch(tag), launch(tag + 1));
+        // (the create tx signed by the whale itself, not the creator: its create-slot buy is a T2 trigger at age 0)
+        let x = arbx::feeds::ExecInfo { index: 7, fee: 5_000, ok: true, trades: Vec::new(), mayhem: false,
+            creates: vec![arbx::dip::CreateEvent { mint: lc.mint, bonding_curve: lc.bonding_curve, user: whale(tag), creator: [0xC1u8; 32] }] };
+        let a = arr(s, sg(0xC7, tag), whale(tag), true, Some(x.clone()), s * 1_000_000);
+        let l2 = lc.clone();
+        p.on_exec(&a, &x, s, move |m: &Pk| (*m == l2.mint).then(|| l2.clone()), &|_| false, None);
+        trade(p, s, 34, sg(0x3E, tag), whale(tag), true, 2_666_666_666, 61_580_021_739_287, 38_692_888_509, 831_935_821_811_615, &lc);
+        create(p, s + 9, &ly);
+        trade(p, s + 10, 34, sg(0x3E, tag + 1), whale(tag + 1), true, 2_666_666_666, 61_580_021_739_287, 38_692_888_509, 831_935_821_811_615, &ly);
+        (lc, ly)
+    };
+    let base = ["--presend-live-min-age-slots", "2", "--presend-live-probe", "on"];
+    // defaults: both skips get their probe window; no new key in the filter state, no lanes segment
+    let ctl = ctl_file("pf0");
+    let mut a = base.to_vec(); a.extend(["--presend-live-ledger-control", ctl.to_str().unwrap()]);
+    let (mut p, _atx, orx) = PsLive::for_test(cfg(&a).unwrap().unwrap(), USER);
+    let (lc, ly) = two(&mut p, 20, N);
+    assert_eq!((p.st.skips.get("create_slot").copied(), p.st.skips.get("young_age").copied()), (Some(1), Some(1)), "{:?}", p.st.skips);
+    assert_eq!((pw(&p, &lc.mint), pw(&p, &ly.mint)), (Some("create_slot"), Some("young_age")));
+    let fs0 = p.f47.fs.clone().unwrap();
+    assert!(fs0.obj.get("probe_filters").is_none() && fs0.obj.get("probe_rearm").is_none() && !p.status46().contains("PROBE lanes"));
+    // the hot key: create_slot out -> the open create_slot window's tries stop at the sender (want_win), new create-slot skips get none
+    let _ = outs(&orx);
+    p.ctl47_apply(&raw(serde_json::json!({"probe_filters": "all,-create_slot", "probe_rearm": "on"})), "t");
+    assert_eq!((p.sh.p46.excl.load(Ordering::SeqCst), p.sh.p46.rearm.load(Ordering::SeqCst)), (psprobe46::filter_bit("create_slot"), true));
+    let (r, lines) = outs(&orx);
+    let m = r.iter().find(|x| x["ev"] == "presend_live_ledger_mode" && x["ok"] == true).unwrap_or_else(|| panic!("{r:?}"));
+    assert_eq!((m["dip47"].clone(), m["was"]["dip47"].clone()), (serde_json::json!({"probe_filters": "all,-create_slot", "probe_rearm": "on"}), serde_json::json!({"probe_filters": "all", "probe_rearm": "off"})));
+    assert!(lines.iter().any(|l| l.contains("probe_filters \"all\" -> \"all,-create_slot\"")), "{lines:?}");
+    let st = r.iter().find(|x| x["ev"] == "presend_live_filter_state").unwrap_or_else(|| panic!("{r:?}"));
+    assert_eq!((st["fv"].as_u64(), st["state"]["probe_filters"].as_str(), st["state"]["probe_rearm"].as_str()), (Some(fs0.fv + 1), Some("all,-create_slot"), Some("on")));
+    let (lc2, ly2) = two(&mut p, 30, N + 100);
+    assert_eq!((pw(&p, &lc2.mint), pw(&p, &ly2.mint)), (None, Some("young_age")), "create_slot excluded, the others still probe");
+    assert!(p.status46().contains(" | PROBE lanes: T2 windows 3 probes 0 / re-arm (on) windows 0 probes 0 | filters all,-create_slot"), "{}", p.status46());
+    // bad values: refused, kept
+    let before = p.f47.cur.unwrap();
+    for bad in [serde_json::json!({"probe_filters": "all,-nonsense", "probe_rearm": "on"}), serde_json::json!({"probe_filters": "all,-create_slot", "probe_rearm": "maybe"}),
+        serde_json::json!({"probe_filters": 5, "probe_rearm": "on"}), serde_json::json!({"probe_filters": "", "probe_rearm": "on"})] {
+        p.ctl47_apply(&raw(bad.clone()), "t");
+        let (r, _) = outs(&orx);
+        assert!(r.iter().any(|x| x["ev"] == "presend_live_ledger_mode" && x["ok"] == false), "{bad}");
+        assert_eq!(p.f47.cur.unwrap(), before, "{bad}");
+    }
+    // absent = the start values (all, off): the state moves back, the atomics follow
+    p.ctl47_apply(&raw(serde_json::json!({})), "t");
+    assert_eq!((p.sh.p46.excl.load(Ordering::SeqCst), p.sh.p46.rearm.load(Ordering::SeqCst)), (0, false));
+    let (lc3, _) = two(&mut p, 40, N + 200);
+    assert_eq!(pw(&p, &lc3.mint), Some("create_slot"));
+    let _ = std::fs::remove_file(&ctl);
+    // the start flag: the same from the first trigger; the keys are in the filter state from fv 0
+    let ctl = ctl_file("pf1");
+    let mut a = base.to_vec(); a.extend(["--presend-live-probe-filters", "all,-create_slot", "--presend-live-ledger-control", ctl.to_str().unwrap()]);
+    let (mut p, _atx, _orx) = PsLive::for_test(cfg(&a).unwrap().unwrap(), USER);
+    let (lc, ly) = two(&mut p, 50, N);
+    assert_eq!((pw(&p, &lc.mint), pw(&p, &ly.mint)), (None, Some("young_age")));
+    assert_eq!((p.f47.fs.as_ref().unwrap().obj["probe_filters"].as_str(), p.f47.fs.as_ref().unwrap().obj["probe_rearm"].as_str()), (Some("all,-create_slot"), Some("off")));
+    let _ = std::fs::remove_file(&ctl);
+    // probes off: the keys are refused
+    let ctl = ctl_file("pf2");
+    let (mut p, _atx, orx) = PsLive::for_test(cfg(&["--presend-live-ledger-control", ctl.to_str().unwrap()]).unwrap().unwrap(), USER);
+    let _ = outs(&orx);
+    p.ctl47_apply(&raw(serde_json::json!({"probe_filters": "all,-create_slot", "probe_rearm": "on"})), "t");
+    let (r, _) = outs(&orx);
+    assert_eq!(r.iter().filter(|x| x["ev"] == "presend_live_ledger_mode" && x["ok"] == false).count(), 2);
+    assert_eq!((p.sh.p46.excl.load(Ordering::SeqCst), p.sh.p46.rearm.load(Ordering::SeqCst)), (0, false));
+    let _ = std::fs::remove_file(&ctl);
+}

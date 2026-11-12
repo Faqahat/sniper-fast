@@ -55,3 +55,23 @@ Nothing on the sender thread or the buy path; no RPC; the flag comes from the de
 
 ## Offline check
 `/home/it/sniper-data/dip50/validate_grx.py` recomputes the rule from the run logs (ann.holders + slots_after_trigger + arm trig.wallet).
+
+## Probe selection + re-arm probes (psprobe46.rs; defaults = dip49c's probes exactly)
+- `--presend-live-probe-filters LIST` / hot key `probe_filters`: `all` (default), a comma list of filter names, `-name` excludes
+  (`all,-create_slot`). Names = the probe records' `filter` values: create_slot, young_age, quiet, quiet3_a, lone_whale, cr_loss, cr_unfollowed,
+  wh_loss, holder_loss, blocklist, m2_unseen, mint_ledger, fanout, s1 (every s1_*), breaker, fresh_holders, fpnb_withheld, skip2_withheld,
+  blocklist_withheld, botdepth_withheld, rival_gate_withheld (accepted; nothing probes a rival-gate withhold, as in dip49), rearm_fleet_withheld,
+  rearm_r5, rearm_holder_loss, rearm_wh_loss, rearm_blocklist, rearm_fresh_holders, rearm_m2_unseen, rearm_cap. Unknown name: refused at start /
+  the key refused (old value kept). `--presend-live-probe-kinds` still applies on top (the breaker stays opt-in there).
+  An excluded filter: no probe window at its skip, no probe of its withheld try; an open probe window of it stops sending (`probe_filter_off`).
+- `--presend-live-probe-rearm on|off` (off) / hot key `probe_rearm`: (a) a re-arm check skipped by rearm_r5 / rearm_holder_loss / rearm_wh_loss /
+  rearm_blocklist / rearm_m2_unseen / rearm_cap, or the re-arm fresh-holders skip (`rearm_fresh_holders`), arms a PROBE WINDOW built as the
+  re-arm window would have been (re-arm size, the limit on the curve at the check, last slot = dump + 3 + gap, starts at once, one try per
+  slot, stops 30 ms after the next >= 6% sell / no >= 6% holder left, ends when a real re-arm window arms on the mint); (b) a re-arm try the
+  fleet rule withholds goes out as a probe (`rearm_fleet_withheld`). Records as the T2 probes with `"kind":"rearm"`. Same refusals as a T2
+  probe window (stopped, a probe window / anything of ours on the mint, max windows, launch accounts) and the SAME global rate
+  (`--presend-live-probe-max-per-sec`). Not probed (not in the request / no clean hook): rearm_cr_loss, rearm_cr_unfollowed, rearm_s1_*,
+  rearm_breaker, rearm_log43, and every non-filter skip (rearm_age, rearm_no_holder, rearm_gone, rearm_untradeable, rearm_blocked_*).
+  Re-arm tries withheld per try by FP-NOBOT / skip2 / bot depth / the per-send blocklist were already probed in dip46 (unchanged).
+- Both keys need `--presend-live-probe on`; they are in the filter state once a flag or key of theirs is in use. Status: ` | PROBE lanes: T2
+  windows N probes N / re-arm (on|off) windows N probes N | filters ...` (only once in use).

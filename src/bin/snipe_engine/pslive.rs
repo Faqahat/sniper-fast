@@ -262,8 +262,8 @@ pub mod ps43_b;
 #[path = "psprobe46.rs"]
 pub mod psprobe46;
 /// dip46's flags (psprobe46.rs; named here so the start-up flag check knows them)
-const D46FLAGS: [&str; 5] = ["--presend-live-probe", "--presend-live-probe-max-per-sec", "--presend-live-probe-kinds", "--presend-live-probe-max-windows",
-    "--presend-live-filter-ab"];
+const D46FLAGS: [&str; 7] = ["--presend-live-probe", "--presend-live-probe-max-per-sec", "--presend-live-probe-kinds", "--presend-live-probe-max-windows",
+    "--presend-live-filter-ab", "--presend-live-probe-filters", "--presend-live-probe-rearm"];
 // dip47: GRPSIGN, the group-holder-risk metric at SIGNING (LOG ONLY; off by default = dip46)
 #[path = "psgrp47.rs"]
 pub mod psgrp47;
@@ -1517,7 +1517,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // why not now (each counted); dip26: the same gate for every window (send_gate: unit-tested), at the window's own spend
             if let Some(why) = send_gate(&sh, sc.cfg.one_position, w.spend) { skp(&sh, probe, why); continue; }
             // dip46: a probe window's try: its first in this slot and a global probe token
-            if probe.is_some() && !s46.want_win(&sh.p46, w.id, slot, now) { continue; }
+            if let Some(pw) = probe { if !s46.want_win(&sh.p46, pw, w.id, slot, now) { continue; } }
             let mut leak43: Option<&'static str> = None;
             let mut bdv: Option<psbd::BdV> = None;
             'gates: {
@@ -1605,7 +1605,11 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // dip47 RE-ARM FLEET rule (re-arm windows only; never a probe): fewer than N fleet-shape tries on the mint in the last SLOTS slots ->
             // withheld (live) / counted (log); fail open without detector data. Lock-free: the window's copy + 4 relaxed loads
             rfv = psrfleet47::gate(&sh.rf, w.rearm, probe.is_some(), &w.rfl, slot, now);
-            if let Some(v) = rfv { srf.note(w.id, w.mint, &v, now); if v.withhold() { sh.skip("rearm_fleet_withheld"); continue 'due; } }
+            if let Some(v) = rfv { srf.note(w.id, w.mint, &v, now); if v.withhold() {
+                sh.skip("rearm_fleet_withheld");
+                // dip50 (probe_rearm on; off: never, dip49c): the withheld re-arm try goes out as a probe
+                match sh.p46.rearm.load(Ordering::Relaxed).then(|| s46.want(&sh.p46, "rearm_fleet_withheld", w.id, slot, now)).flatten() { Some(p) => probe = Some(p), None => continue 'due }
+            } }
             // dip49 T2 RIVAL GATE (T2 windows' real tries only): no / few rivals failing on the mint (and a young dev) -> withheld (live) /
             // counted (log); fail open on a stale fail stream / a blind feed. Lock-free: the window's copy + 5 relaxed loads
             rgv = psrival49::gate(&sh.rg, &w.rg, probe.is_some(), slot, now);

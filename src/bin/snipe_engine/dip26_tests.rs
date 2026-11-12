@@ -1735,3 +1735,107 @@ fn dip48_fresh_skip_rearm_lane() {
     }
     eprintln!("dip48 fresh re-arm lane: {seen:?}");
 }
+
+/// dip50 RE-ARM PROBES (--presend-live-probe-rearm on / key probe_rearm; psprobe46.rs): a re-arm check skipped by a FILTER (here the
+/// per-mint cap) gets a probe window built as the re-arm window would have been (the re-arm size, last slot = dump + 3 + gap, a sender
+/// window with p46 = the filter: every try signs min_out u64::MAX), kind "rearm" on its records; off (default) / the filter excluded: none
+/// (dip49c). Each listed why arms one; the non-filter skips never. It stops like a re-arm window (the next >= 6% sell)
+#[test]
+fn dip50_rearm_probe_windows() {
+    let _acct = ACCT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    arbx::feeds::own_fail_watch(USER);
+    for (extra, want) in [(vec![], false), (vec!["--presend-live-probe-rearm", "on"], true),
+        (vec!["--presend-live-probe-rearm", "on", "--presend-live-probe-filters", "all,-rearm_cap"], false)] {
+        let mut ex = vec!["--presend-live-rearm", "on", "--presend-live-rearm-size-sol", "0.3", "--presend-rearm-max-per-mint", "1", "--presend-live-probe", "on"];
+        ex.extend(extra.iter().copied());
+        let mut c = Ctx::new(&ex);
+        let (a, b, d2, x) = ([0xA1u8; 32], [0xB1u8; 32], [0xD2u8; 32], [0x33u8; 32]);
+        let mut tk = c.token(1, 1000, &[(a, 7.0), (b, 8.0), (d2, 9.0)]);
+        let mut z = c.token(90, 1000, &[]);
+        for s in 1001..=1004 { let e = tk.buy(x, S / 10); c.tx(s, 5, vec![e], vec![]); }
+        // one re-arm fill on the mint already (the cap's count): D2's dump is a candidate, its check at dump + 3 skips "rearm_cap"
+        c.p.f47.rfills.insert(tk.mint, 1);
+        let dd = tk.sell_tok(d2, pct(9.0));
+        c.tx(1005, 5, vec![dd], vec![]);
+        clock(&mut c, &mut z, 1006, 1008);
+        assert_eq!(c.ev("presend_live_skip").iter().filter(|r| r["why"] == "rearm_cap").count(), 1, "{:?}", c.ev("presend_live_skip"));
+        assert!(c.p.armed.is_empty() && c.p.pos.is_empty());
+        let arms = c.ev("presend_live_probe_arm");
+        let sw = { let g = c.p.sh.wins.lock().unwrap(); g.iter().find(|w| w.p46.is_some()).map(|w| (w.id, w.p46, w.rearm, w.spend, w.en_slot, w.mint)) };
+        if !want {
+            assert!(arms.is_empty() && sw.is_none() && c.p.p46.wins.is_empty(), "{arms:?}");
+            assert_eq!(c.p.p46.ra_windows, 0);
+            continue;
+        }
+        let gap = c.rearm().cfg.gap;
+        let (id, why, rearm, spend, en, mint) = sw.expect("a re-arm probe window at the sender");
+        assert!(id > psprobe46::PW0 && why == Some("rearm_cap") && rearm && mint == tk.mint, "a probe window (never a real one): every try signs min_out u64::MAX");
+        assert_eq!((spend, en), (300_000_000, 1005 + psrearm::RE_WAIT + gap), "the re-arm size and the re-arm window's last slot");
+        assert_eq!(arms.len(), 1);
+        assert_eq!((arms[0]["kind"].as_str(), arms[0]["filter"].as_str(), arms[0]["w"].as_u64(), arms[0]["spend"].as_u64(), arms[0]["en_slot"].as_u64()),
+            (Some("rearm"), Some("rearm_cap"), Some(id), Some(300_000_000), Some(en)));
+        assert!(arms[0]["dump"]["seller"] == b58(&d2) && arms[0].get("trig").is_none());
+        assert!(c.p.p46.wins[&id].rearm && c.p.p46.ra_windows == 1);
+        // its probe as the sender registers it: the probe book only (never the real tries'), counted on the re-arm lane
+        let mut sg = [0u8; 64]; sg[0] = 0x50; sg[1] = 0xAB;
+        c.atx.send(Att { w: id, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | (0xD50 << 8), path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1009, deadline: 1010, lim: 0.00003,
+            min_out: psprobe46::PROBE_MIN_OUT, p_sign: 1.0, sign_pos: (1008, 0, 0), t_send: 1009 * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
+            tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None,
+            x46: psprobe46::X46 { probe: Some("rearm_cap"), ab: 0, spend: 300_000_000, fr: 0.0125, sv: tk.v, st: tk.t, min: 7_000_000_000_000 }, rf: None, rg: None }).unwrap();
+        c.p.drain_atts();
+        assert!(c.p.atts.is_empty() && c.p.p46.ra_probes == 1 && c.p.p46.wins[&id].sent == 1);
+        assert!(c.p.status46().contains(" | PROBE lanes: T2 windows 0 probes 0 / re-arm (on) windows 1 probes 1"), "{}", c.p.status46());
+        // each listed why arms a probe window (its filter name); the non-filter skips never
+        let dump = |m: Pk, s: u64| psrearm::RDump { tr: pl::Trade { mint: m, s, i: 5, j: 0, sig: [0u8; 64], user: [0xDDu8; 32], buy: false, sol: 3 * S, tok: pct(8.0), vsol: 33 * S,
+            vtok: 980_000_000_000_000, fbps: 95, cbps: 30, t_rx: s * 1_000_000 }, age: 20 };
+        for (k, (w, name)) in [("rearm_r5", "rearm_r5"), ("rearm_holder_loss", "rearm_holder_loss"), ("rearm_wh_loss", "rearm_wh_loss"), ("rearm_blocklist", "rearm_blocklist"),
+            ("fresh_holders", "rearm_fresh_holders"), ("rearm_m2_unseen", "rearm_m2_unseen")].iter().enumerate() {
+            let t2 = Tk::new(100 + k as u8);
+            c.p.p46_skip_rearm(w, t2.mint, &dump(t2.mint, 1008), Some(&t2.launch), 1011);
+            let got = c.p.p46.by_mint.get(&t2.mint).map(|id| (c.p.p46.wins[id].why, c.p.p46.wins[id].rearm));
+            assert_eq!(got, Some((*name, true)), "{w}: {:?}", c.p.p46.win_refused);
+        }
+        let n0 = c.p.p46.wins.len();
+        for (k, w) in ["rearm_age", "rearm_no_holder", "rearm_gone", "rearm_blocked_position", "rearm_blocked_ata_open", "rearm_blocked_inflight", "rearm_blocked_launch",
+            "rearm_blocked_live_armed", "rearm_breaker", "rearm_log43", "rearm_cr_loss", "create_slot"].iter().enumerate() {
+            let t2 = Tk::new(150 + k as u8);
+            c.p.p46_skip_rearm(w, t2.mint, &dump(t2.mint, 1008), Some(&t2.launch), 1011);
+            assert!(!c.p.p46.by_mint.contains_key(&t2.mint), "{w}");
+        }
+        assert_eq!(c.p.p46.wins.len(), n0);
+        // the same refusals as a T2 probe window: one per mint, the window cap (8), no launch accounts
+        c.p.p46_skip_rearm("rearm_r5", tk.mint, &dump(tk.mint, 1008), Some(&tk.launch), 1011);
+        let t9 = Tk::new(199);
+        c.p.p46_skip_rearm("rearm_r5", t9.mint, &dump(t9.mint, 1008), None, 1011);
+        let t8 = Tk::new(198);
+        c.p.p46_skip_rearm("rearm_r5", t8.mint, &dump(t8.mint, 1008), Some(&t8.launch), 1011);
+        assert_eq!(c.p.p46.wins.len(), 8, "{:?}", c.p.p46.win_refused);
+        c.p.p46_skip_rearm("rearm_r5", t9.mint, &dump(t9.mint, 1008), Some(&t9.launch), 1011);
+        assert_eq!((c.p.p46.wins.len(), c.p.p46.win_refused.get("probe_window_on_mint").copied(), c.p.p46.win_refused.get("max_windows").copied()), (8, Some(1), Some(1)));
+        assert!(c.p.p46.win_refused.len() == 3, "{:?}", c.p.p46.win_refused);
+        // the hot key off: no new window; the open re-arm probe windows end
+        let raw = psctl47::ctl47_parse(br#"{"probe_rearm": "off"}"#).unwrap();
+        if extra.len() == 2 {
+            // a >= 6% sell on the token first: the window stops like a re-arm window (30 ms later at the sender)
+            let db = tk.sell_tok(b, pct(8.0));
+            c.tx(1009, 7, vec![db], vec![]);
+            assert!(c.p.p46.wins[&id].stop_at.is_some());
+            assert!(c.p.sh.wins.lock().unwrap().iter().find(|w| w.id == id).unwrap().stop_ns < u64::MAX);
+        }
+        c.p.ctl47_apply(&raw, "t");
+        c.drain();
+        assert!(c.p.p46.wins.is_empty() && !c.p.sh.wins.lock().unwrap().iter().any(|w| w.p46.is_some()));
+        let ends = c.ev("presend_live_probe_end");
+        assert!(ends.len() == 8 && ends.iter().all(|e| e["kind"] == "rearm" && e["why"] == "probe_rearm_off"), "{ends:?}");
+        let t7 = Tk::new(197);
+        c.p.p46_skip_rearm("rearm_r5", t7.mint, &dump(t7.mint, 1008), Some(&t7.launch), 1011);
+        assert!(c.p.p46.wins.is_empty());
+        // the probe never seen: its landing record says the lane
+        c.tick(1020);
+        let lands = c.ev("presend_live_probe_land");
+        assert_eq!(lands.len(), 1);
+        assert_eq!((lands[0]["kind"].as_str(), lands[0]["filter"].as_str(), lands[0]["res"].as_str(), lands[0]["would_min_out"].as_u64(), lands[0]["spend"].as_u64()),
+            (Some("rearm"), Some("rearm_cap"), Some("unseen"), Some(7_000_000_000_000), Some(300_000_000)));
+        assert_eq!(c.p.st.fills, 0);
+    }
+}
