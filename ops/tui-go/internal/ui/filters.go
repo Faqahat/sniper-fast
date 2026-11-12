@@ -599,7 +599,20 @@ func (m *Model) fltTableLines(w int) []string {
 		case r.Cal: // calibrated: the cal numbers lead, the raw paper net in its dim column
 			s += nums(m.solCell(r.CalNet(), r.CalWinN+r.CalLoseN, true), "cal", r.CalWinN, r.CalLoseN, r.Blocked, r.CalWinSol, r.CalLoseSol, core.FS(r.Net(), 3), false)
 		case r.Type == "LIVE":
-			s += nums(m.solCell(r.Net(), r.WinN+r.LoseN, true), "pap", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, core.FS(r.Net(), 3), false)
+			cell := m.solCell(r.Net(), r.WinN+r.LoseN, true)
+			if r.WinN+r.LoseN == 0 && r.Blocked > 0 { // v5.1: a zero is either "no dip" (nothing would have filled) or "n/a" (no way to price it)
+				if nd, unk := m.fltDip(r.Key); nd+unk > 0 {
+					txt := "no dip"
+					switch {
+					case nd == 0:
+						txt = "n/a"
+					case unk > 0:
+						txt = "no dip*"
+					}
+					cell = t.Dim.Render(txt)
+				}
+			}
+			s += nums(cell, "pap", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, core.FS(r.Net(), 3), false)
 		default:
 			s += nums(m.solCell(r.Net(), r.WinN+r.LoseN, true), "real", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, "", false)
 		}
@@ -1128,4 +1141,25 @@ func (m *Model) fltTrade(it core.FiltItem) *core.Trade {
 		}
 	}
 	return nil
+}
+
+// fltDip: for a LIVE row with no scored skip: how many of its skips are "no dip" (probes / the shadow window say the price never
+// reached our limit) and how many cannot be priced (re-arm windows without probes). From the Trades tab's skip rows (skips.go).
+func (m *Model) fltDip(key string) (nodip, unknown int) {
+	if m.view == nil {
+		return 0, 0
+	}
+	for i := range m.view.Skips {
+		r := &m.view.Skips[i]
+		if r.Why != key && strings.TrimPrefix(r.Why, "rearm_") != key {
+			continue
+		}
+		switch {
+		case r.NoDip():
+			nodip++
+		case !r.HasPaper && !r.HasProbePnl:
+			unknown++
+		}
+	}
+	return nodip, unknown
 }
