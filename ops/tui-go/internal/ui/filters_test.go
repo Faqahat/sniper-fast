@@ -57,7 +57,7 @@ func TestGoldenFilters(t *testing.T) {
 				t.Errorf("%s line %d: %d cells", name, i+1, w)
 			}
 		}
-		if !strings.Contains(got, "FILTERS") || !strings.Contains(got, "SKIPPED / BLOCKED") || !strings.Contains(got, "+2.196") || (sz[0] >= 80 && !strings.Contains(got, "+1.277")) { // the calibrated net; the raw paper net where it fits
+		if !strings.Contains(got, "FILTERS") || !strings.Contains(got, "SKIPPED / BLOCKED") || !strings.Contains(got, "+2.196") { // the calibrated net (v5.2: the raw paper column is gone)
 			t.Errorf("%s: the table is missing:\n%s", name, got)
 		}
 		fp := filepath.Join("testdata", "golden", name)
@@ -338,12 +338,12 @@ func TestFiltersVerdicts(t *testing.T) {
 			t.Errorf("%s shown while folded", s)
 		}
 	}
-	if strings.Contains(table, "LOG  safe sell timer") {
+	if strings.Contains(table, "\u25cf safe sell timer") {
 		t.Errorf("dismissed rows shown by default:\n%s", table)
 	}
 	out = ansi.Strip(drive(m, keyMsg("d")))
 	table = strings.Split(out, "SKIPPED / BLOCKED")[0]
-	if !strings.Contains(table, "LOG  safe sell timer") || !strings.Contains(table, "DISMISSED  d hide") || !strings.Contains(table, "within group risk") {
+	if !strings.Contains(table, "\u25cf safe sell timer") || !strings.Contains(table, "DISMISSED  d hide") || !strings.Contains(table, "\u25cf holder clock") {
 		t.Errorf("d: the dismissed rows are not shown:\n%s", table)
 	}
 	for _, sz := range [][2]int{{200, 45}, {120, 40}, {100, 30}, {99, 30}, {80, 30}, {76, 24}, {75, 24}, {50, 30}, {49, 20}, {40, 20}, {36, 12}} {
@@ -442,7 +442,7 @@ func TestFiltersNoDipMove(t *testing.T) {
 	if strings.Contains(list(out), " move") { // LOG rows only: no move column
 		t.Errorf("move column without LIVE rows:\n%s", list(out))
 	}
-	if !strings.Contains(out, "QUIET3-A (log)") {
+	if _, ok := m.view.Filt.Row("q3a"); !ok || !strings.Contains(out, "QUIET3-A") { // v5.2: names carry no "(log)"; the row's key says it
 		t.Errorf("QUIET3-A not live: the log row is missing:\n%s", out)
 	}
 	out = ansi.Strip(drive(m, keyMsg("v")))
@@ -490,7 +490,7 @@ func TestFiltersNoDipMove(t *testing.T) {
 	m.Init()
 	drive(m, tea.WindowSizeMsg{Width: 160, Height: 50})
 	out = ansi.Strip(drive(m, keyMsg("8")))
-	if strings.Contains(out, "QUIET3-A (log)") || !strings.Contains(out, "fresh holders") {
+	if _, ok := m.view.Filt.Row("q3a"); ok || !strings.Contains(out, "fresh holders") {
 		t.Errorf("QUIET3-A live: the log row is still shown:\n%s", out)
 	}
 	if m.uiErrs != 0 {

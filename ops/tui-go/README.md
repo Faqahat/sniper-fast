@@ -788,3 +788,13 @@ images of a few for a phone: DejaVu Sans Mono on a dark background, roughly what
   happened: nothing saved or lost); `fill?` when a probe would have filled but there is no priced shadow; `–` only when there is
   neither (re-arm windows, legacy-create tokens, more windows than the probe rate covers). The SKIP panel shows "probes: N landed,
   K would have filled"; the header counts `no fill N`.
+
+## v5.2 (11-12): the Filters table, decluttered (owner: "too much information")
+
+- A **green circle = live** (the filter blocks trades), a **violet circle = log** (it only marks what it would block): no LIVE / LOG
+  words, no "(log)" / "[live]" / "(new)" / "(dip48)" suffixes on names (the item list below uses the same circles).
+- Gone: the verdict column, "new", the precision column, the raw-paper column, the two legend lines. One legend line on top
+  (saved / cal / real / no dip / n/a) and one below (green = saved, red = cost).
+- Last column "what" = what the filter does in plain words (`fltWhats`), dropped below ~120 columns.
+- A LIVE row with no scored skip says `no dip` (nothing would have filled) or `n/a` (re-arm: cannot be priced) instead of +0.000.
+- Dismissed (folded behind `d`): + equal-size group, HYBRID-2.

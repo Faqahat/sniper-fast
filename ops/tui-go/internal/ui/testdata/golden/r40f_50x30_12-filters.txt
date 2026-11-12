@@ -1,30 +1,30 @@
 ╱╱ REWIND ╱╱  ● /tmp/TestGoldenFilte  +6.0009 SOL
   1   2   3   4   5   6   7   8 Flt
-FILTERS ──────────────── LIVE live · LOG log only
-paper is ~2× optimistic; decide on cal · cal = ea…
-   filter        vrdt      net  prec  blkd   W   L
-LV create-slot   KEEP   +2.196c  83% 1,036  31 150
-LV age-1 skip    KEEP   +0.586c  87%   137   5  33
-LV deeper limit  –      +0.401c  78%   348  13  45
-   └ 77 deep fills gain +0.995  NET +1.396 c
-LV QUIET         KEEP   +0.386c  88%   254   3  23
-LV 10-sec skip   KEEP   +0.035c  67%    92   1   2
-LG bad creator   LV32   -0.300   57%    21   9  12
-LG group risk    LOG    +0.721   64%    22   8  14
-▸ 3 dismissed (d)       +1.011   61%    44  17  27
-LIVE unique             +3.604c  83% 1,867  53 253
-LOG unique              +0.640   60%    48  19  29
-ALL total               +4.244c  80% 1,915  72 282
-net saved: green saved, red cost · prec = losers …
+FILTERS ───────────────────── ● live · ● log only
+saved = what its blocks would have lost · cal = e…
+  filter              saved   blkd   W   L
+● create-slot skip   +2.196c 1,036  31 150
+● age-1 skip         +0.586c   137   5  33
+● deeper limit       +0.401c   348  13  45
+  └ 77 deep fills gain +0.995  NET +1.396 c
+● QUIET              +0.386c   254   3  23
+● 10-sec skip        +0.035c    92   1   2
+● bad creator        -0.300     21   9  12
+● group risk         +0.721     22   8  14
+▸ 3 dismissed (d)    +1.011     44  17  27
+LIVE unique          +3.604c 1,867  53 253
+LOG unique           +0.640     48  19  29
+ALL total            +4.244c 1,915  72 282
+green = the filter saved money, red = it cost mon…
 SKIPPED / BLOCKED ───────────────────────────────
 all  (48)  +1,867 shadow (v)       19W 29L  -0.640
         ▼time ty filter     mint   res      SOL
-▸  1:29:41 AM LG ST+GR+HC   F36E6X LOSE  -0.121
-   1:01:48 AM LG bad creat… 7BD66f LOSE  -0.014
-   1:01:41 AM LG group risk APMC9u LOSE  -0.233
-  12:45:12 AM LG ST+GR+HC   4sneNy WIN   +0.141
-  12:33:21 AM LG bad creat… 99hmVC LOSE  -0.019
-  12:29:24 AM LG bad creat… FkaMPD WIN   +0.285
-  12:24:43 AM LG BC+ST+GR+… B6Ygbi WIN   +0.040
+▸  1:29:41 AM ●  ST+GR+HC   F36E6X LOSE  -0.121
+   1:01:48 AM ●  bad creat… 7BD66f LOSE  -0.014
+   1:01:41 AM ●  group risk APMC9u LOSE  -0.233
+  12:45:12 AM ●  ST+GR+HC   4sneNy WIN   +0.141
+  12:33:21 AM ●  bad creat… 99hmVC LOSE  -0.019
+  12:29:24 AM ●  bad creat… FkaMPD WIN   +0.285
+  12:24:43 AM ●  BC+ST+GR+… B6Ygbi WIN   +0.040
  ▲ engine gone without DIP DONE
  ↑/k up · f filter …              1/48  ♪ all  1s

@@ -265,18 +265,51 @@ func (m *Model) fltItems2() ([]core.FiltItem, int, int) {
 // tagLive / tagLog: the LIVE / LOG badges.
 func (m *Model) fltTag(live bool, short bool) string {
 	t := m.th
-	if live {
-		s := "LIVE"
-		if short {
-			s = "LV"
-		}
-		return t.AccB.Render(s)
+	if live { // v5.2 (owner 11-12): a green circle = LIVE (it blocks trades), a violet one = LOG (it only marks what it would block)
+		return t.Good.Render(m.g("\u25cf", "*"))
 	}
-	s := "LOG"
-	if short {
-		s = "LG"
+	if t.Mono {
+		return m.g("\u25cb", "o")
 	}
-	return t.Warn.Render(s)
+	return lipgloss.NewStyle().Foreground(t.Violet).Render(m.g("\u25cf", "o"))
+}
+
+// fltClean: a row's name without the mode / build suffixes the circle already says ("(log)", "[live]", "(new)", "(dip48)", "would").
+func fltClean(name string) string {
+	for _, x := range []string{" (log)", " (live)", " (new)", " (dip48)", " (approx)", " would"} {
+		name = strings.ReplaceAll(name, x, "")
+	}
+	if i := strings.Index(name, " ["); i > 0 { // the mode history tags: " [live]", " [log]", " [live→log]"
+		name = name[:i]
+	}
+	return strings.TrimSpace(name)
+}
+
+// fltWhats: what each filter does, in plain words (the table's last column).
+var fltWhats = map[string]string{
+	"create_slot": "whale bought in the token's first slot", "quiet": "quiet token: no bot follow-up on the whale's past dumps",
+	"young_age": "token only 1 slot old", "lone_whale": "lone whale, token older than 10 s", "breaker": "pause after 2 losses in 30 min",
+	"cr_loss": "creator cost us twice before", "cr_unfollowed": "creator's tokens get no followers", "quiet3_a": "dead token + new whale",
+	"fpnb_live": "no follower bot expected (model)", "fpnb": "no follower bot expected (model)", "blocklist": "a listed attacker wallet holds",
+	"wh_loss": "this whale cost us before", "rearm_wh_loss": "this dumper cost us before", "holder_loss": "a holder who cost us before is in",
+	"skip2_live": "per-try loss model", "skip2": "per-try loss model", "m2_unseen": "no scored dump before the trigger",
+	"grp_t2": "fast-selling holders in at arm", "grp": "fast-selling holders in at our landing", "mint_ledger": "we already lost on this token",
+	"fanout_live": "whale spread over many wallets", "fresh_holders": "too many brand-new holders", "fresh": "too many brand-new holders",
+	"rgate_live": "no rivals bidding / young dev wallet", "rearm_cap": "re-arm fills per token capped", "pause_window": "night pause window",
+	"rfleet_live": "re-arm: wait for the bot fleet", "botdepth_live": "fewer than 3 known bots traded it", "deeper": "deeper limit while a 6% holder stays",
+	"q3a": "dead token + new whale", "eqgrp": "several equal-size holders", "fam": "launch bundle family holds", "h2": "HYBRID-2 arm rule",
+	"st": "safe sell timer", "hc": "holder clock", "guard": "landing guard", "ctx85": "context score", "gcr": "bad creator (run only)",
+	"crlog": "creator ledger would-skip", "ga": "2+ top holders left before we landed", "gd": "a top-5 guard holder left before we landed",
+	"mintled": "we already lost on this token", "fanout": "whale spread over many wallets", "fpstrict": "stricter no-follower-bot model",
+	"grpsign": "fast-selling holders in when the try was signed", "rfleet": "re-arm: wait for the bot fleet", "fresh48": "too many brand-new holders",
+	"rgate": "no rivals bidding / young dev wallet", "farm": "farm floor", "wh_other": "whale ledger, other rule", "wh_logmode": "whale ledger in log mode", "hl_logmode": "holder ledger in log mode",
+}
+
+func fltWhat(key, fallback string) string {
+	if w, ok := fltWhats[key]; ok {
+		return w
+	}
+	return fallback
 }
 
 // solCell: a SOL amount in green / red (3 decimals, signed).
@@ -318,7 +351,7 @@ var fltVerdicts = map[string]fltVerdict{
 	"q3a":           {vgLog, "LOG", "weak on holdout"},
 	"fresh":         {vgLog, "LOG", "attack guard (G3)"},
 	"crlog":         {vgLog, "LOG", "ledger off: would-skips"},
-	"eqgrp":         {vgLog, "LOG", "mixed r51/r53"},
+	"eqgrp":         {vgDism, "DISMISSED", "mixed r51/r53"},
 	"fam":           {vgLog, "LOG new", "bundle rug (dip35)"},
 	"fpnb":          {vgLog, "LOG new", "no follower bot (dip36)"},
 	"skip2":         {vgLog, "LOG new", "per-send logit (dip36)"},
@@ -332,7 +365,7 @@ var fltVerdicts = map[string]fltVerdict{
 	"wh_logmode":    {vgLog, "LOG", "whale ledger in log mode"},
 	"hl_logmode":    {vgLog, "LOG", "holder ledger in log mode"},
 	"m2_unseen":     {vgLive, "LIVE new", "no M2 dump before (dip37)"},
-	"h2":            {vgLog, "LOG new", "HYBRID-2 arm rule (dip37)"},
+	"h2":            {vgDism, "DISMISSED", "HYBRID-2 arm rule (dip37)"},
 	"st":            {vgDism, "DISMISSED", "within group risk"},
 	"hc":            {vgDism, "DISMISSED", "dup of group risk"},
 	"guard":         {vgDism, "DISMISSED", "flagged did better"},
@@ -460,26 +493,27 @@ func (m *Model) fltTableLines(w int) []string {
 		}
 	}
 	var nameW, tagW, vdW, netW, precW int
+	_ = vdW
 	showBlk, showWL := true, true
 	switch mode {
 	case 0:
-		tagW, vdW, netW, precW = 5, 10, 9, 5
-		nameW = max(8, min(24, w-74-srcW-papW))
+		papW = 0
+		tagW, vdW, netW, precW = 2, 0, 9, 0
+		nameW = max(8, min(26, w-54-srcW))
 	case 1:
-		tagW, vdW, netW, precW = 5, 10, 9, 5
-		nameW = max(8, min(24, w-52-srcW-papW))
+		papW = 0
+		tagW, vdW, netW, precW = 2, 0, 9, 0
+		nameW = max(8, min(26, w-32-srcW))
 	default:
-		tagW, vdW, netW, precW = 3, 4, 8, 4
-		nameW = 13
-		fixed := tagW + nameW + 1 + vdW + 1 + netW + srcW + 1 + precW // 35 (36 with the cal marker)
+		papW = 0
+		tagW, vdW, netW, precW = 2, 0, 8, 0
+		nameW = 16
+		fixed := tagW + nameW + 1 + netW + srcW
 		if fixed+6+8 > w {
 			showWL = false
 		}
 		if fixed+6 > w {
 			showBlk = false
-		}
-		if calOn && fixed+6+8+8 <= w { // phones: the paper column when it fits
-			papW = 8
 		}
 		if fixed > w {
 			nameW = max(4, nameW-(fixed-w))
@@ -487,8 +521,8 @@ func (m *Model) fltTableLines(w int) []string {
 	}
 	whyW := 0
 	if mode == 0 {
-		whyW = w - (74 + srcW + papW + nameW) - 3
-		if whyW < 12 {
+		whyW = w - (54 + srcW + nameW) - 3
+		if whyW < 24 { // too narrow to say what the filter does: drop the column
 			whyW = 0
 		}
 	}
@@ -519,7 +553,10 @@ func (m *Model) fltTableLines(w int) []string {
 	}
 	// the numbers after the name + verdict (net, prec, blocked, W / L), shared by the rows, the totals and the folded line
 	nums := func(net, src string, winN, loseN, blocked int, winSol, loseSol float64, paper string, bold bool) string {
-		s := " " + padLeft(net, netW) + srcCell(src) + " " + m.precCell(winN, loseN, precW)
+		s := " " + padLeft(net, netW) + srcCell(src)
+		if precW > 0 {
+			s += " " + m.precCell(winN, loseN, precW)
+		}
 		blk := core.IC(int64(blocked))
 		st := t.Val
 		if bold {
@@ -555,17 +592,17 @@ func (m *Model) fltTableLines(w int) []string {
 				papH = " " + padLeft("paper", papW-1)
 			}
 		}
-		s := padRight("", tagW) + padRight("filter", nameW) + " " + padRight("verdict", vdW) + " " + padLeft("net saved", netW) + srcH + " " + padLeft("prec", precW)
+		s := padRight("", tagW) + padRight("filter", nameW) + " " + padLeft("saved", netW) + srcH
 		switch mode {
 		case 0:
 			s += bar + padLeft("blocked", 7) + bar + padLeft("would win", 13) + bar + padLeft("would lose", 13) + papH
 			if whyW > 0 {
-				s += "   why"
+				s += "   what"
 			}
 		case 1:
 			s += bar + padLeft("blocked", 7) + " " + padLeft("W", 4) + " " + padLeft("L", 4) + papH
 		default:
-			s = padRight("", tagW) + padRight("filter", nameW) + " " + padRight("vrdt", vdW) + " " + padLeft("net", netW) + srcH + " " + padLeft("prec", precW)
+			s = padRight("", tagW) + padRight("filter", nameW) + " " + padLeft("saved", netW) + srcH
 			if showBlk {
 				s += " " + padLeft("blkd", 5)
 			}
@@ -577,9 +614,9 @@ func (m *Model) fltTableLines(w int) []string {
 		return t.Lbl.Render(s)
 	}
 	row := func(r core.FiltRow) string {
-		name := r.Name
+		name := fltClean(r.Name)
 		if ansi.StringWidth(name) > nameW {
-			name = fltShort(r.Key, r.Name)
+			name = fltShort(r.Key, name)
 		}
 		name = cut(name, nameW)
 		vd := fltVerdictOf(r)
@@ -588,7 +625,8 @@ func (m *Model) fltTableLines(w int) []string {
 		if mode == 2 {
 			lbl = fltVerdictShort(lbl)
 		}
-		s := tag + strings.Repeat(" ", max(0, tagW-ansi.StringWidth(tag))) + t.Val.Render(padRight(name, nameW)) + " " + m.verdictStyle(vd).Render(padRight(cut(lbl, vdW), vdW))
+		_ = lbl
+		s := tag + strings.Repeat(" ", max(0, tagW-ansi.StringWidth(tag))) + t.Val.Render(padRight(name, nameW))
 		if r.NA { // a rule this run does not log (the landing guard before dip30)
 			if mode == 2 {
 				return s + " " + t.Dim.Render(padLeft("n/a", netW)+" dip30+")
@@ -610,6 +648,8 @@ func (m *Model) fltTableLines(w int) []string {
 						txt = "no dip*"
 					}
 					cell = t.Dim.Render(txt)
+					s += nums(cell, "", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, core.FS(r.Net(), 3), false)
+					break
 				}
 			}
 			s += nums(cell, "pap", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, core.FS(r.Net(), 3), false)
@@ -617,7 +657,7 @@ func (m *Model) fltTableLines(w int) []string {
 			s += nums(m.solCell(r.Net(), r.WinN+r.LoseN, true), "real", r.WinN, r.LoseN, r.Blocked, r.WinSol, r.LoseSol, "", false)
 		}
 		if whyW > 0 {
-			why := vd.why
+			why := fltWhat(r.Key, vd.why)
 			if r.Key == "gcr" && R.Seed == "" {
 				why = "no seed: this run only; " + why
 			}
@@ -625,7 +665,7 @@ func (m *Model) fltTableLines(w int) []string {
 		}
 		return s
 	}
-	lead := tagW + nameW + 1 + vdW // the label span of a total / the folded line
+	lead := tagW + nameW // the label span of a total / the folded line
 	total := func(label, src string, x core.FiltTotal, paper string) string {
 		return t.Lbl.Render(padRight(cut(label, lead), lead)) + nums(m.solCell(x.Net, 1, true), src, x.WinN, x.LoseN, x.Blocked, x.WinSol, x.LoseSol, paper, true)
 	}
@@ -662,7 +702,7 @@ func (m *Model) fltTableLines(w int) []string {
 			continue
 		}
 		if r.Blocked == 0 && !r.NA {
-			idle = append(idle, r.Name)
+			idle = append(idle, fltClean(r.Name))
 			continue
 		}
 		out = append(out, row(r))
@@ -680,7 +720,7 @@ func (m *Model) fltTableLines(w int) []string {
 		var winSol, loseSol float64
 		anyCal, anyLive := false, false
 		for _, r := range dism {
-			names = append(names, fltShort(r.Key, r.Name))
+			names = append(names, fltClean(fltShort(r.Key, r.Name)))
 			if !r.NA {
 				net += r.ShownNet()
 				pnet += r.Net()
@@ -775,9 +815,9 @@ func (m *Model) scrFilters(w, bh int) string {
 	}
 	sep := t.Dim.Render(" " + m.g("·", "|") + " ")
 	var out []string
-	livePap := " changed what the engine did (paper)"
+	livePap := " live: blocks trades (paper)"
 	if R.Calib != nil {
-		livePap = " changed what the engine did (cal)"
+		livePap = " live: blocks trades (cal)"
 	}
 	right := m.fltTag(true, false) + t.Lbl.Render(livePap) + sep + m.fltTag(false, false) + t.Lbl.Render(" log only, would-have (real fills)")
 	if w < 100 {
@@ -785,38 +825,20 @@ func (m *Model) scrFilters(w, bh int) string {
 	}
 	out = append(out, m.rule("FILTERS", right, w))
 	if R.Calib != nil { // v4 (11-11): the one-line warning: decide on the calibrated numbers
-		note := t.Warn.Render("paper is ~2× optimistic; decide on cal") + t.Dim.Render(" · cal = each blocked window's paper mapped to expected live P&L (gatecheck 11-11); paper net = raw")
+		note := t.Dim.Render("saved = what its blocks would have lost · cal = expected live value · real = real fills · no dip = nothing would have filled · n/a = cannot be priced")
 		if m.ascii {
-			note = t.Warn.Render("paper is ~2x optimistic; decide on cal") + t.Dim.Render(" | cal = each blocked window's paper mapped to expected live P&L (gatecheck 11-11); paper net = raw")
+			note = t.Dim.Render("saved = what its blocks would have lost | cal = expected live value | real = real fills | no dip = nothing would have filled | n/a = cannot be priced")
 		}
 		out = append(out, cut(note, w))
 	}
 	out = append(out, m.fltTableLines(w)...)
 	// the legend: what net saved / prec / verdict mean (one line), then (wide) how LIVE and LOG rows are scored
-	foot := t.Dim.Render("net saved = "+m.g("−", "-")+"(what the blocked would have made): ") + t.Pos.Render("green saved") + t.Dim.Render(", ") + t.Neg.Render("red cost") + sep +
-		t.Dim.Render("prec = losers / marked") + sep + t.Dim.Render("verdict: FILTERS-3 11-03")
-	if w < 120 {
-		foot = t.Dim.Render("net saved: ") + t.Pos.Render("green saved") + t.Dim.Render(", ") + t.Neg.Render("red cost") + sep + t.Dim.Render("prec = losers / marked") + sep +
-			t.Dim.Render("verdict 11-03")
-	}
+	foot := t.Pos.Render("green") + t.Dim.Render(" = the filter saved money, ") + t.Neg.Render("red") + t.Dim.Render(" = it cost money") + sep + t.Dim.Render("blocked = triggers / windows it stopped; would win / lose = the ones that would have filled")
 	out = append(out, cut(foot, w))
 	if w >= 120 {
-		leg := "LIVE rows: paper; blocked = triggers skipped, W/L = the ones that would have filled · LOG rows: real fills"
-		if R.Calib != nil {
-			leg = "LIVE rows: cal (src cal); blocked = triggers skipped, W/L = filled-on-paper windows by calibrated sign · LOG rows: real fills"
+		if R.RearmSkips > 0 { // v5.2: one short line only when it says something
+			out = append(out, t.Dim.Render(cut(fmt.Sprintf("re-arm skips %s have no value yet (no shadow window or probes for re-arm)", core.IC(R.RearmSkips)), w)))
 		}
-		seed := "bad creator: no ledger seed (this run's fills only)"
-		if R.Seed != "" {
-			seed = fmt.Sprintf("bad creator ledger: %d creators seeded", R.SeedN)
-		}
-		leg += " · " + seed
-		if R.RearmSkips > 0 {
-			leg += fmt.Sprintf("; re-arm skips %s not scored (no shadow)", core.IC(R.RearmSkips))
-		}
-		if m.ascii {
-			leg = strings.ReplaceAll(leg, "·", "|")
-		}
-		out = append(out, t.Dim.Render(cut(leg, w)))
 	}
 	// the skip list
 	items, hidden, shadowHid := m.fltItems2()
@@ -1036,8 +1058,13 @@ func (m *Model) fltList(w int, rows []core.FiltItem, sel int) string {
 				if it.Live {
 					st = t.AccB
 				}
+				// v5.2: the same circles as the table (green = live, violet = log)
+				s, st = m.g("\u25cf", "*"), t.Good
+				if !it.Live {
+					s, st = m.g("\u25cf", "o"), lipgloss.NewStyle().Foreground(t.Violet)
+				}
 			case "filter": // a LOG fill: every rule that would have blocked it
-				s = it.Name
+				s = fltClean(it.Name)
 				if ansi.StringWidth(s) > c.w {
 					sh := make([]string, len(it.Rules))
 					for j, r := range it.Rules {
