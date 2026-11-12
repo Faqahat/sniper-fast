@@ -20,6 +20,7 @@ type LogRule struct {
 	Key, Name, Short, Note string // the row's key, its table name, its short name in the list, its note
 	Code                   string // 2 cells (a phone's skip list)
 	Verdict, Why           string // the Filters tab's verdict label and reason (FILTERS-3 style)
+	ModeKey                string // v5: the filter's live / log control key (the row's name follows the run's modes; "" = log only)
 	Records                []string
 	Feed                   func(st *RuleState, ev string, o map[string]any)
 	Present                func(st *RuleState, fill map[string]any) bool
@@ -106,7 +107,7 @@ var LogRules = []LogRule{
 			n, _ := mNum(gd, "n")
 			return true, fmt.Sprintf("guards %.0f of %.0f below 90%%", b, n)
 		}},
-	{Key: "mintled", Code: "ML", Name: "mint ledger (log)", Short: "mint ledger", Verdict: "LOG new", Why: "MINT-LEDGER (dip43 A6)",
+	{Key: "mintled", Code: "ML", Name: "mint ledger (log)", Short: "mint ledger", ModeKey: "mint_ledger", Verdict: "LOG new", Why: "MINT-LEDGER (dip43 A6)",
 		Note:    "real fills; MINT-LEDGER: an earlier landing on the mint at or below the ledger's loss (would have skipped the trigger)",
 		Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "mint_ledger") != nil },
 		Flag: func(_ *RuleState, f map[string]any) (bool, string) {
@@ -118,7 +119,7 @@ var LogRules = []LogRule{
 			wst, _ := mNum(ml, "worst")
 			return true, fmt.Sprintf("mint ledger %.0f landings, worst %s", n, fmtSigned(wst/1e9, 3))
 		}},
-	{Key: "fanout", Code: "FO", Name: "fan-out (log)", Short: "fan-out", Verdict: "LOG new", Why: "FANOUT (dip43 A4)",
+	{Key: "fanout", Code: "FO", Name: "fan-out (log)", Short: "fan-out", ModeKey: "fanout", Verdict: "LOG new", Why: "FANOUT (dip43 A4)",
 		Note:    "real fills; FANOUT: the arm's fam read found >= N plain-transfer recipients (would have disarmed)",
 		Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "fanout") != nil },
 		Flag: func(_ *RuleState, f map[string]any) (bool, string) {
@@ -129,7 +130,7 @@ var LogRules = []LogRule{
 			n, _ := mNum(fo, "n")
 			return true, fmt.Sprintf("fan-out %.0f recipients", n)
 		}},
-	{Key: "fpstrict", Code: "FS", Name: "FP strict (log)", Short: "FP strict", Verdict: "LOG new", Why: "FP-NOBOT strict (dip43 A10)",
+	{Key: "fpstrict", Code: "FS", Name: "FP strict (log)", Short: "FP strict", ModeKey: "fpnb_strict", Verdict: "LOG new", Why: "FP-NOBOT strict (dip43 A10)",
 		Note:    "real fills; FP-NOBOT strict: the window had a T2 slot the strict threshold blocked (the frozen one passed)",
 		Records: []string{"presend_live_fpnb_strict"},
 		Feed:    func(st *RuleState, _ string, o map[string]any) { st.Set("fpstrict", mW(o)) },
@@ -145,7 +146,7 @@ var LogRules = []LogRule{
 // v5 (dip47): GRPSIGN and the re-arm fleet rule on the fill records; "measured" = scored on the real fills
 var _ = func() bool {
 	LogRules = append(LogRules,
-		LogRule{Key: "grpsign", Code: "GS", Name: "group at signing (log)", Short: "grp at signing", Verdict: "LOG new", Why: "GRPSIGN T2 (dip47)",
+		LogRule{Key: "grpsign", Code: "GS", Name: "group at signing (log)", Short: "grp at signing", ModeKey: "grp_t2", Verdict: "LOG new", Why: "GRPSIGN T2 (dip47)",
 			Note:    "measured (real fills); GRPSIGN: the T2 window's group at the filling try's signing >= grp_t2_pct (trigger whale per grp_t2_whale; the fill's state)",
 			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "grpsign") != nil },
 			Flag: func(_ *RuleState, f map[string]any) (bool, string) {
@@ -171,7 +172,7 @@ var _ = func() bool {
 				}
 				return true, fmt.Sprintf("group %.1f%% at signing (whale %s) >= %.1f%%", p, whale, thr)
 			}},
-		LogRule{Key: "rfleet", Code: "RF", Name: "re-arm fleet (log)", Short: "re-arm fleet", Verdict: "LOG new", Why: "REARM FLEET (dip47)",
+		LogRule{Key: "rfleet", Code: "RF", Name: "re-arm fleet (log)", Short: "re-arm fleet", ModeKey: "rearm_fleet", Verdict: "LOG new", Why: "REARM FLEET (dip47)",
 			Note:    "measured (real fills); RE-ARM FLEET: the filling re-arm try saw fewer fleet tries than the rule's N (it would have been withheld; fail-open tries not counted)",
 			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "rearm_fleet") != nil },
 			Flag: func(_ *RuleState, f map[string]any) (bool, string) {

@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"io"
-	"os"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -189,14 +189,14 @@ func (T *ProbeTape) priceExit(mint string, s, i int64, T0, tok, spend float64) (
 // ------------------------------------------------------------------------------------------------- the accumulator
 
 type v5Land struct {
-	w                       int64
-	filter, mint, sig, res  string
-	slot, idx               int64
-	hasIdx                  bool
-	fee, spend, minOut      float64
-	wouldFill, hasPre       bool
-	preVtok, wouldTok       float64
-	t                       int64
+	w                      int64
+	filter, mint, sig, res string
+	slot, idx              int64
+	hasIdx                 bool
+	fee, spend, minOut     float64
+	wouldFill, hasPre      bool
+	preVtok, wouldTok      float64
+	t                      int64
 }
 
 type v5AB struct {
@@ -205,10 +205,10 @@ type v5AB struct {
 }
 
 type v5Change struct {
-	T              int64
-	Fv             int64
-	Key, Old, New  string
-	Src            string
+	T             int64
+	Fv            int64
+	Key, Old, New string
+	Src           string
 }
 
 type v5Pause struct {
@@ -233,45 +233,45 @@ type v5Fleet struct {
 }
 
 type v5Grp struct {
-	W                          int64
-	Mint, Kind, At             string
-	Pct, PctX                  float64
-	N                          int64
-	WB, WBX, WB6, WhaleIn      bool
+	W                     int64
+	Mint, Kind, At        string
+	Pct, PctX             float64
+	N                     int64
+	WB, WBX, WB6, WhaleIn bool
 }
 
 type v5Funder struct {
-	W                 int64
-	Mint, At, Funder  string
-	Pct, C1Pct        float64
-	N, C1N, Resolved  int64
-	HasC1             bool
+	W                int64
+	Mint, At, Funder string
+	Pct, C1Pct       float64
+	N, C1N, Resolved int64
+	HasC1            bool
 }
 
 // V5Fill: one live fill's v5 view (hours, big trades, the trade row's fv, the details).
 type V5Fill struct {
-	W                  int64
-	Mint, Kind         string // Kind "T2" | "RA"
-	T                  int64
-	Spend              int64
-	Pnl                int64
-	HasPnl             bool
-	Exit               string
-	Fv, FvFill         int64
-	HasFv, HasFvFill   bool
-	Fh                 string
-	Grp                *v5GrpFill
-	Fleet              *v5FleetFill
-	Fund               *v5FundFill
-	AB                 string // "bypass" / "live" arms, "f1:bypass f2:live"
-	ABWould            []string
+	W                int64
+	Mint, Kind       string // Kind "T2" | "RA"
+	T                int64
+	Spend            int64
+	Pnl              int64
+	HasPnl           bool
+	Exit             string
+	Fv, FvFill       int64
+	HasFv, HasFvFill bool
+	Fh               string
+	Grp              *v5GrpFill
+	Fleet            *v5FleetFill
+	Fund             *v5FundFill
+	AB               string // "bypass" / "live" arms, "f1:bypass f2:live"
+	ABWould          []string
 }
 
 type v5GrpFill struct {
-	Pct, PctX  float64
-	HasPct     bool
-	WB, WBX    bool
-	Miss       bool
+	Pct, PctX float64
+	HasPct    bool
+	WB, WBX   bool
+	Miss      bool
 }
 
 type v5FleetFill struct {
@@ -289,9 +289,9 @@ type v5FundFill struct {
 }
 
 type landAgg struct {
-	h        Hist
-	n        int64
-	le       [4]int64 // <= 35 / 50 / 65 / 80 ms
+	h  Hist
+	n  int64
+	le [4]int64 // <= 35 / 50 / 65 / 80 ms
 }
 
 var landThr = [4]float64{35, 50, 65, 80}
@@ -310,64 +310,64 @@ func (a *landAgg) add(ms float64) {
 type V5Acc struct {
 	ver int64
 	// dip46
-	d46, probeOn                bool
-	probeKinds                  string
-	probeRate, probeMaxW        int64
-	abCfg, abNow                []string
-	abNowSet                    bool
-	probeArms                   map[string]int64
-	probeArmN                   int64
-	probeSent                   map[string]int64
-	probeSentN                  int64
-	probeDry                    int64
-	probeTip                    map[string]float64
-	lands                       []*v5Land
-	probeEnds                   map[string]int64
-	probeFilled                 int64
-	abW                         map[int64]*v5AB
-	abOrd                       []int64
-	abRec                       map[string]int64
+	d46, probeOn         bool
+	probeKinds           string
+	probeRate, probeMaxW int64
+	abCfg, abNow         []string
+	abNowSet             bool
+	probeArms            map[string]int64
+	probeArmN            int64
+	probeSent            map[string]int64
+	probeSentN           int64
+	probeDry             int64
+	probeTip             map[string]float64
+	lands                []*v5Land
+	probeEnds            map[string]int64
+	probeFilled          int64
+	abW                  map[int64]*v5AB
+	abOrd                []int64
+	abRec                map[string]int64
 	// dip47
-	fsAny                       bool
-	fsCur                       map[string]json.RawMessage
-	fv                          int64
-	fh, fsSrc                   string
-	fsT                         int64
-	fsN                         int64
-	changes                     []v5Change
-	ctlErr                      []string
-	ctlPath                     string
-	pauses                      []v5Pause
-	pauseSkipStatus             int64
-	hasPauseStatus              bool
-	caps                        []v5Cap
-	capDrops                    int64
-	fleets                      []v5Fleet
-	grps                        []v5Grp
-	grpSkips                    []v5Grp
-	funders                     []v5Funder
-	funderAt                    map[FKey]*v5Funder
-	funderArmN                  int64
+	fsAny           bool
+	fsCur           map[string]json.RawMessage
+	fv              int64
+	fh, fsSrc       string
+	fsT             int64
+	fsN             int64
+	changes         []v5Change
+	ctlErr          []string
+	ctlPath         string
+	pauses          []v5Pause
+	pauseSkipStatus int64
+	hasPauseStatus  bool
+	caps            []v5Cap
+	capDrops        int64
+	fleets          []v5Fleet
+	grps            []v5Grp
+	grpSkips        []v5Grp
+	funders         []v5Funder
+	funderAt        map[FKey]*v5Funder
+	funderArmN      int64
 	// fills (hours / big trades / fv): keyed by w like hours.py
-	fills                       map[int64]*V5Fill
-	fillOrd                     []int64
-	fillKey                     map[FKey]*V5Fill
-	realW                       map[int64]int64
-	realHas                     map[int64]bool
-	exitW                       map[int64]string
+	fills   map[int64]*V5Fill
+	fillOrd []int64
+	fillKey map[FKey]*V5Fill
+	realW   map[int64]int64
+	realHas map[int64]bool
+	exitW   map[int64]string
 	// landing
-	land                        map[string]*landAgg
-	landOrd                     []string
-	cache                       *V5Report
-	cacheVer                    int64
-	cacheTape                   *ProbeTape
-	curTape                     *ProbeTape                          // the tape the probes were priced on (nil = none)
-	flagFn                      func(w int64, mint string) []string // the Filters report's flags of a fill (the view sets it)
+	land      map[string]*landAgg
+	landOrd   []string
+	cache     *V5Report
+	cacheVer  int64
+	cacheTape *ProbeTape
+	curTape   *ProbeTape                          // the tape the probes were priced on (nil = none)
+	flagFn    func(w int64, mint string) []string // the Filters report's flags of a fill (the view sets it)
 }
 
 func newV5Acc() *V5Acc {
 	return &V5Acc{probeArms: map[string]int64{}, probeSent: map[string]int64{}, probeTip: map[string]float64{}, probeEnds: map[string]int64{},
-		abW: map[int64]*v5AB{},
+		abW:   map[int64]*v5AB{},
 		abRec: map[string]int64{}, fsCur: map[string]json.RawMessage{}, funderAt: map[FKey]*v5Funder{}, fills: map[int64]*V5Fill{},
 		fillKey: map[FKey]*V5Fill{}, realW: map[int64]int64{}, realHas: map[int64]bool{}, exitW: map[int64]string{}, land: map[string]*landAgg{}}
 }
@@ -820,20 +820,20 @@ type V5Report struct {
 
 // PauseView: the pause banner (Active, the window, the next start / end in PKT, the manual pause).
 type PauseView struct {
-	Active               bool
-	Window, Manual       string
-	NextStart, NextEnd   int64 // ns (0 = none)
-	Skips                int64
+	Active             bool
+	Window, Manual     string
+	NextStart, NextEnd int64 // ns (0 = none)
+	Skips              int64
 }
 
 // ProbeRow: one filter's probe line (probe_check.py part 1).
 type ProbeRow struct {
-	Filter                                string
-	Probes, Windows, Would, EngWould      int64
-	Agree, Win, Lose                      int64
-	Net, Net1, Fees                       float64
-	Why                                   map[string]int64
-	Priced                                bool
+	Filter                           string
+	Probes, Windows, Would, EngWould int64
+	Agree, Win, Lose                 int64
+	Net, Net1, Fees                  float64
+	Why                              map[string]int64
+	Priced                           bool
 }
 
 // Report: the sections for the view (now: ns, the pause's next start / end; tape: --probe-tape or nil = no exit pricing; multi:
@@ -1818,10 +1818,10 @@ func pnlAny(f *V5Fill) any {
 
 // HoursRow: one PKT hour.
 type HoursRow struct {
-	Hour                         int
-	Fills, Wins, BigW, BigL      int64
-	BigWSol, BigLSol, Net        float64
-	Runs                         map[string]bool
+	Hour                    int
+	Fills, Wins, BigW, BigL int64
+	BigWSol, BigLSol, Net   float64
+	Runs                    map[string]bool
 }
 
 // HoursTable: 24 rows (index = PKT hour).

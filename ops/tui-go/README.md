@@ -42,6 +42,12 @@ every v4 screen, `--snapshot` and `--json` byte-identical to v4 on r82; only the
   fleet (live)` (counted, no value: re-arm windows have no shadow; the pause has no record per trigger); LOG rows (registry)
   `group at signing (log)` and `re-arm fleet (log)` (**measured** on the real fills). Shown only once they acted / a fill carries
   the field.
+- **Filters rows follow each filter's mode (fix, r84)**: the run's live / log history per switchable filter (run_start
+  `presend_live.dip43` `*_live`, `presend_live_dip43`, `presend_live_ledger_mode` `dip43` / `dip47` keys, the dip47 filter state,
+  `presend_live_fpnb_strict.live`). A LIVE mint ledger / fan-out is a LIVE row (`mint ledger [live]`: its T2 skips, calibrated);
+  the LOG row of a filter that ran live is `… would [live]` (fills it did not gate) or hidden when it flagged none; the A9 gates'
+  LIVE rows get ` [log]` / ` [live→log]` once a control key put them in log mode. Log-only runs keep the v4 names. A ledger-mode
+  record without whale / holder keys (dip46 / dip47 / pause records) no longer flips the whale / holder rows to live.
 - **Snapshot / JSON**: the dip46 / dip47 sections as `v5 ...` lines and a `"v5": {...}` object whenever the run has them;
   `--v5` adds hours, big trades and landing (and every fill's v5 fields).
 - **Test data**: `~/sniper-data/dipmon5/dip47test/make_dip47_log.py` (r83 with every dip47 record type added in the a85abd28

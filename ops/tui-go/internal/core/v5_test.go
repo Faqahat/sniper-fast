@@ -184,3 +184,55 @@ func TestV5ProbeR83(t *testing.T) {
 		t.Fatalf("rows %d", got)
 	}
 }
+
+// TestFilterModes (r84 fix): the Filters rows follow each filter's live / log mode (start flags, dip43 / dip47 control keys,
+// the filter state); a record without a whale / holder key leaves those modes alone.
+func TestFilterModes(t *testing.T) {
+	M := NewModel(0, 100)
+	feed := func(r string) { M.FeedJSONL([][]byte{[]byte(r)}) }
+	feed(`{"ev":"run_start","presend_live":{"wh_loss":"2:0.3","ledger_control":"/x","dip43":{"mint_ledger":0.1,"mint_ledger_live":true,"fanout":10,"fanout_live":false}}}`)
+	feed(`{"ev":"presend_live_ledger_mode","ok":true,"whale":"log","holder":"live"}`)
+	feed(`{"ev":"presend_live_ledger_mode","ok":true,"dip46":{"probe46":true}}`)
+	feed(`{"ev":"presend_live_skip","why":"mint_ledger","trig":{"sig":"S1","mint":"M1","t":1}}`)
+	feed(`{"ev":"presend_live_fill","w":5,"mint":"M5","kind":"rearm","t":2,"mint_ledger":{"n":2,"worst":-103846188,"would_block":true}}`)
+	feed(`{"ev":"presend_live_realized","w":5,"mint":"M5","kind":"rearm","pnl":-50000000}`)
+	R := M.Filt.Report("", nil)
+	name := func(k string) string {
+		r, ok := R.Row(k)
+		if !ok {
+			return ""
+		}
+		return r.Name
+	}
+	if n := name("mint_ledger"); n != "mint ledger [live]" {
+		t.Fatalf("live row %q", n)
+	}
+	if n := name("mintled"); n != "mint ledger would [live]" {
+		t.Fatalf("log row %q", n)
+	}
+	if n := name("fanout"); n != "fan-out (log)" && n != "" {
+		t.Fatalf("fan-out %q", n)
+	}
+	if !M.Filt.modeSeen("whale", "log") || M.Filt.modeWh || name("wh_logmode") == "" {
+		t.Fatalf("whale mode %v (a dip46 record must not flip it to live)", M.Filt.modes["whale"])
+	}
+	feed(`{"ev":"presend_live_ledger_mode","ok":true,"dip43":{"mint_ledger":"log","create_slot":"log"},"was":{"dip43":{"mint_ledger":"live","create_slot":"live"}}}`)
+	feed(`{"ev":"presend_live_filter_state","fv":1,"fh":"x","src":"control","state":{"mint_ledger":"log","create_slot":"live"},"changed":{}}`)
+	R = M.Filt.Report("", nil)
+	if n := name("mint_ledger"); n != "mint ledger [live→log]" {
+		t.Fatalf("switched %q", n)
+	}
+	if n := name("create_slot"); n != "create-slot skip [log→live]" {
+		t.Fatalf("A9 %q", n)
+	}
+	// a run where the ledger was log only: the v4 name
+	M2 := NewModel(0, 100)
+	M2.FeedJSONL([][]byte{[]byte(`{"ev":"run_start","presend_live":{"dip43":{"mint_ledger":0.1,"mint_ledger_live":false}}}`),
+		[]byte(`{"ev":"presend_live_fill","w":5,"mint":"M5","kind":"t2","t":2,"mint_ledger":{"n":2,"worst":-1,"would_block":true}}`)})
+	if r, ok := M2.Filt.Report("", nil).Row("mintled"); !ok || r.Name != "mint ledger (log)" {
+		t.Fatalf("log-only %+v", r)
+	}
+	if _, ok := M2.Filt.Report("", nil).Row("mint_ledger"); ok {
+		t.Fatal("a LIVE row on a log-only run")
+	}
+}

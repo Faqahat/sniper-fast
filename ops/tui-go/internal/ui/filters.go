@@ -95,6 +95,10 @@ func fltShort(key, name string) string {
 		return "holder (log mode)"
 	case "m2_unseen":
 		return "M2 unseen"
+	case "mint_ledger":
+		return "mint ledger live"
+	case "fanout_live":
+		return "fan-out live"
 	case "h2":
 		return "HYBRID-2 (log)"
 	}
@@ -334,6 +338,8 @@ var fltVerdicts = map[string]fltVerdict{
 	"guard":         {vgDism, "DISMISSED", "flagged did better"},
 	"ctx85":         {vgDism, "DISMISSED", "attack-only gain"},
 	"grp_t2":        {vgLive, "LIVE new", "group at signing (dip47)"},
+	"mint_ledger":   {vgLive, "LIVE new", "mint ledger live (dip43)"},
+	"fanout_live":   {vgLive, "LIVE new", "fan-out live (dip43)"},
 	"rearm_cap":     {vgLive, "LIVE new", "re-arm fills per mint (dip47)"},
 	"pause_window":  {vgLive, "LIVE new", "PKT pause window (dip47)"},
 	"rfleet_live":   {vgLive, "LIVE new", "re-arm fleet rule (dip47)"},

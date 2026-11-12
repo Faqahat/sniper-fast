@@ -331,24 +331,27 @@ type FiltAcc struct {
 	blOrd  []FKey
 	blHeld int
 	// v4: the paper partition (snapshot "paper" line): shadow w -> row c armed slots, live T2 trigger sig -> w, attempts per w
-	shArms    []fShArm      // the shadow's windows in arm order
-	shCur     map[int64]int // shadow w -> its latest arm (index in shArms)
-	skipSig   map[string]bool
-	liveCur   map[int64]int  // live w -> its latest arm (index in liveSent)
-	liveSent  []int          // per live arm: real (not dry) tries sent
-	liveSigA  map[string]int // live T2 trigger sig -> its arm (index in liveSent)
-	shSize0   float64        // the first row c fill's size (SOL)
-	hasSh0    bool
-	q3Live    bool                    // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
-	anyWide   bool                    // v4: a wide shadow record (dip30+)
-	rs        *RuleState              // v4: the LOG rule registry's own records (logrules.go)
-	fillObj   map[FKey]map[string]any // v4: each position's first fill record, decoded (the registry's verdicts)
-	plKeys    map[string]bool         // v4: the latest run_start's presend_live keys (the build inference of runs before "ENGINE BUILD:")
+	shArms   []fShArm      // the shadow's windows in arm order
+	shCur    map[int64]int // shadow w -> its latest arm (index in shArms)
+	skipSig  map[string]bool
+	liveCur  map[int64]int  // live w -> its latest arm (index in liveSent)
+	liveSent []int          // per live arm: real (not dry) tries sent
+	liveSigA map[string]int // live T2 trigger sig -> its arm (index in liveSent)
+	shSize0  float64        // the first row c fill's size (SOL)
+	hasSh0   bool
+	q3Live   bool                    // QUIET3-A runs live (run_start presend_live.quiet3a, or a "quiet3_a" skip)
+	anyWide  bool                    // v4: a wide shadow record (dip30+)
+	rs       *RuleState              // v4: the LOG rule registry's own records (logrules.go)
+	fillObj  map[FKey]map[string]any // v4: each position's first fill record, decoded (the registry's verdicts)
+	plKeys   map[string]bool         // v4: the latest run_start's presend_live keys (the build inference of runs before "ENGINE BUILD:")
 	// v5 (dip47): the pause's skipped arms (no record per trigger: ledger_mode "off" records, run_end), the re-arm fleet rule's live
 	// withheld windows (presend_live_rearm_fleet), a dip47 filter-state record seen
 	pauseSkips, pauseEnd int64
 	pauseAny, d47        bool
 	rfWin                []fGateWin
+	// v5 fix (11-11, r84): each switchable filter's mode over the run (start flags, dip43 / dip47 control keys, the filter state),
+	// so a row's label says what the filter really did (a LIVE mint ledger is a LIVE row, not "mint ledger (log)")
+	modes map[string][]string // state key -> modes in order (consecutive duplicates folded)
 
 	cache     *FiltReport
 	cacheVer  int64
@@ -405,6 +408,11 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			for _, i := range ix {
 				LogRules[i].Feed(F.rs, string(ev), o)
 			}
+			if string(ev) == "presend_live_fpnb_strict" { // v5: the strict verdict's mode on each record
+				if b, ok := o["live"].(bool); ok {
+					F.setMode("fpnb_strict", map[bool]string{true: "live", false: "log"}[b])
+				}
+			}
 		}
 		return
 	}
@@ -420,6 +428,16 @@ func (F *FiltAcc) feed(ev, line []byte) {
 					F.pauseEnd, F.pauseAny = n, true
 					F.ver++
 				}
+			}
+		}
+		if string(ev) == "run_start" { // v5: the dip43 A4 / A6 / A10 modes at the start
+			var d struct {
+				PL *struct {
+					D43 map[string]any `json:"dip43"`
+				} `json:"presend_live"`
+			}
+			if json.Unmarshal(line, &d) == nil && d.PL != nil {
+				F.d43Modes(d.PL.D43)
 			}
 		}
 		if string(ev) == "run_start" { // dip37: the run's ledger / A/B / HYBRID-2 flags (its rows from the start)
@@ -471,10 +489,28 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		return
 	}
 	switch string(ev) {
-	case "presend_live_filter_state": // v5 (dip47)
+	case "presend_live_filter_state": // v5 (dip47): the modes of every switchable filter
 		if !F.d47 {
 			F.d47 = true
 			F.ver++
+		}
+		var r struct {
+			State map[string]any `json:"state"`
+		}
+		if json.Unmarshal(line, &r) == nil {
+			for k, v := range r.State {
+				if x, ok := v.(string); ok {
+					F.setMode(k, x)
+				}
+			}
+		}
+		return
+	case "presend_live_dip43": // v5: the dip43 config (A4 / A6 / A10 modes at the start)
+		var r struct {
+			Cfg map[string]any `json:"cfg"`
+		}
+		if json.Unmarshal(line, &r) == nil {
+			F.d43Modes(r.Cfg)
 		}
 		return
 	case "presend_live_rearm_fleet": // v5 (dip47): a re-arm window's fleet summary; live withheld windows
@@ -603,15 +639,35 @@ func (F *FiltAcc) feed(ev, line []byte) {
 			}
 		}
 		var r struct {
-			Ok bool    `json:"ok"`
-			Wh string  `json:"whale"`
-			Hl string  `json:"holder"`
-			S2 *string `json:"skip2"`
+			Ok  bool           `json:"ok"`
+			Wh  *string        `json:"whale"`
+			Hl  *string        `json:"holder"`
+			S2  *string        `json:"skip2"`
+			D43 map[string]any `json:"dip43"`
+			D47 map[string]any `json:"dip47"`
 		}
 		if json.Unmarshal(line, &r) == nil && r.Ok {
-			F.modeWh, F.modeHl = r.Wh != "log", r.Hl != "log"
+			// v5 fix: only the keys the record has (a dip46 / dip47 / pause record has no whale / holder key: it changes neither)
+			if r.Wh != nil {
+				F.modeWh = *r.Wh != "log"
+				F.setMode("whale", *r.Wh)
+			}
+			if r.Hl != nil {
+				F.modeHl = *r.Hl != "log"
+				F.setMode("holder", *r.Hl)
+			}
 			if r.S2 != nil {
 				F.s2Live = *r.S2 != "off"
+			}
+			for k, v := range r.D43 {
+				if x, ok := v.(string); ok {
+					F.setMode(k, x)
+				}
+			}
+			for k, v := range r.D47 {
+				if x, ok := v.(string); ok {
+					F.setMode(k, x)
+				}
 			}
 			F.ver++
 		}
@@ -706,6 +762,9 @@ func (F *FiltAcc) feed(ev, line []byte) {
 		why := "?"
 		if r.Why != nil && *r.Why != "" {
 			why = *r.Why
+		}
+		if why == "fanout" { // v5: the LIVE fan-out row (the registry's LOG row has the key "fanout")
+			why = "fanout_live"
 		}
 		F.skips = append(F.skips, fSkip{why: why, sig: r.Trig.Sig, mint: r.Trig.Mint, t: rawInt(r.Trig.T)})
 		F.skipSig[r.Trig.Sig] = true
@@ -1219,6 +1278,81 @@ var optLiveFilters = []struct{ why, name string }{{"breaker", "circuit breaker"}
 var d37LiveFilters = []struct{ why, name string }{{"wh_loss", "whale loss (T2)"}, {"rearm_wh_loss", "whale loss (re-arm)"}, {"holder_loss", "holder loss (T2 / re-arm)"},
 	{"m2_unseen", "M2 unseen"}}
 
+// modeKeys: the switchable filters whose mode the rows follow (filter-state / control-key names).
+var modeKeys = map[string]bool{"mint_ledger": true, "fanout": true, "fpnb_strict": true, "quiet": true, "quiet3a": true, "create_slot": true,
+	"young_age": true, "lone_whale": true, "cr_loss": true, "blocklist_arm": true, "breaker": true, "rearm_fleet": true, "grp_t2": true,
+	"whale": true, "holder": true, "skip2": true}
+
+// setMode notes key's mode now ("live" / "log"; anything else is ignored).
+func (F *FiltAcc) setMode(key, m string) {
+	if !modeKeys[key] || (m != "live" && m != "log") {
+		return
+	}
+	if F.modes == nil {
+		F.modes = map[string][]string{}
+	}
+	h := F.modes[key]
+	if len(h) == 0 || h[len(h)-1] != m {
+		F.modes[key] = append(h, m)
+		F.ver++
+	}
+}
+
+// modeSeen: whether the filter ran in mode m at some point of the run.
+func (F *FiltAcc) modeSeen(key, m string) bool {
+	for _, x := range F.modes[key] {
+		if x == m {
+			return true
+		}
+	}
+	return false
+}
+
+// modeTag: " [live]", " [log]", " [log→live]", ... from the run's modes ("" = never recorded).
+func (F *FiltAcc) modeTag(key string) string {
+	h := F.modes[key]
+	if len(h) == 0 {
+		return ""
+	}
+	if len(h) > 3 {
+		h = []string{h[0], G.Ell, h[len(h)-1]}
+	}
+	return " [" + strings.Join(h, G.Arrow) + "]"
+}
+
+// logName: a LOG rule's row name: as v4 ("... (log)") when the filter only ever ran in log mode (or no mode is recorded); with
+// the run's modes when it ran live ("mint ledger (log) [log→live]" = the would-blocks on fills while it was in log mode).
+func (F *FiltAcc) logName(name, key string) string {
+	if key == "" || !F.modeSeen(key, "live") {
+		return name
+	}
+	return strings.TrimSuffix(name, " (log)") + " would" + F.modeTag(key)
+}
+
+// logNote: a LOG rule's note, with what its fills mean once the filter ran live.
+func (F *FiltAcc) logNote(note, key string) string {
+	if key == "" || !F.modeSeen(key, "live") {
+		return note
+	}
+	return note + "; the filter ran" + F.modeTag(key) + ": while live it gates T2 only, so these are fills it did not gate (re-arm) or let through"
+}
+
+// liveName: a LIVE row's name: as v4 while the filter only ran live; " [log]" / " [live→log]" ... once it ran in log mode.
+func (F *FiltAcc) liveName(name, key string) string {
+	if key == "" || !F.modeSeen(key, "log") {
+		return name
+	}
+	return name + F.modeTag(key)
+}
+
+// liveModeKey: the control key of a LIVE row's skip reason.
+var liveModeKey = map[string]string{"quiet": "quiet", "create_slot": "create_slot", "young_age": "young_age", "lone_whale": "lone_whale",
+	"breaker": "breaker", "cr_loss": "cr_loss", "cr_unfollowed": "cr_loss", "quiet3_a": "quiet3a", "blocklist": "blocklist_arm",
+	"mint_ledger": "mint_ledger", "fanout_live": "fanout", "grp_t2": "grp_t2"}
+
+// d43LiveFilters: dip43's LIVE arm-time skips (A6 mint ledger, A4 fan-out), shown once one fired or the filter ran live.
+var d43LiveFilters = []struct{ why, name, key string }{{"mint_ledger", "mint ledger", "mint_ledger"}, {"fanout_live", "fan-out", "fanout"}}
+
 // d47LiveFilters: dip47's LIVE skips (v5), shown once one fired: GRPSIGN's T2 skip at the arm (calibrated paper) and the re-arm cap
 var d47LiveFilters = []struct{ why, name string }{{"grp_t2", "group at signing (T2)"}, {"rearm_cap", "re-arm cap"}}
 
@@ -1410,6 +1544,10 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		}
 		return "mode LOG (skips nothing now); "
 	}
+	for _, f := range d43LiveFilters { // v5: A6 / A4 in live mode skip triggers
+		byWhy[f.why] = &FiltRow{Key: f.why, Name: f.name + F.modeTag(f.key), Type: "LIVE",
+			Note: "calibrated (paper -> cal); blocked = T2 triggers skipped at the arm, W/L = the ones whose shadow filled"}
+	}
 	for _, f := range d47LiveFilters { // v5 (dip47)
 		note := "calibrated (paper -> cal); blocked = T2 triggers skipped at the arm, W/L = the ones whose shadow filled"
 		if f.why == "rearm_cap" {
@@ -1483,10 +1621,19 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 		}
 	}
 	for _, f := range liveFilters {
-		R.Rows = append(R.Rows, *byWhy[f.why])
+		row := *byWhy[f.why]
+		row.Name = F.liveName(row.Name, liveModeKey[f.why]) // v5: " [log]" once the control key put it in log mode
+		R.Rows = append(R.Rows, row)
 	}
 	for _, f := range optLiveFilters {
 		if byWhy[f.why].Blocked > 0 || F.d37 {
+			row := *byWhy[f.why]
+			row.Name = F.liveName(row.Name, liveModeKey[f.why])
+			R.Rows = append(R.Rows, row)
+		}
+	}
+	for _, f := range d43LiveFilters { // v5: the mint ledger / fan-out LIVE (r84: "mint_ledger_live": true)
+		if byWhy[f.why].Blocked > 0 || F.modeSeen(f.key, "live") {
 			R.Rows = append(R.Rows, *byWhy[f.why])
 		}
 	}
@@ -1506,7 +1653,9 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 	// v5 (dip47): GRPSIGN's T2 skip, the re-arm cap, the pause window, the re-arm fleet rule live (each once it acted, or on a dip47 run)
 	for _, f := range d47LiveFilters {
 		if byWhy[f.why].Blocked > 0 {
-			R.Rows = append(R.Rows, *byWhy[f.why])
+			row := *byWhy[f.why]
+			row.Name = F.liveName(row.Name, liveModeKey[f.why])
+			R.Rows = append(R.Rows, row)
 		}
 	}
 	if F.pauseAny {
@@ -1880,8 +2029,11 @@ func (F *FiltAcc) compute(seedPath string) *FiltReport {
 					ks = append(ks, k)
 				}
 			}
+			if r.ModeKey != "" && F.modeSeen(r.ModeKey, "live") && !F.modeSeen(r.ModeKey, "log") && len(ks) == 0 {
+				present = false // v5: it ran live the whole run and flagged no fill: its LIVE row says what it did
+			}
 			if present {
-				logrule(r.Key, r.Name, ks, r.Note)
+				logrule(r.Key, F.logName(r.Name, r.ModeKey), ks, F.logNote(r.Note, r.ModeKey))
 			}
 		}
 	}
@@ -2323,4 +2475,19 @@ func filtersJSON(v *View, d *JObj) {
 		o.Set("all_total_cal", tot(R.AllCal))
 	}
 	d.Set("filters", o)
+}
+
+// d43Modes: the A4 fan-out / A6 mint ledger / A10 FP strict modes from a dip43 config (run_start presend_live.dip43,
+// presend_live_dip43 cfg): {"mint_ledger": 0.1, "mint_ledger_live": true, "fanout": 10, "fanout_live": false, "fpnb_strict": 0.3}.
+func (F *FiltAcc) d43Modes(c map[string]any) {
+	for _, k := range []string{"mint_ledger", "fanout", "fpnb_strict"} {
+		if v, ok := c[k]; !ok || v == nil {
+			continue
+		}
+		m := "log"
+		if b, _ := c[k+"_live"].(bool); b {
+			m = "live"
+		}
+		F.setMode(k, m)
+	}
 }

@@ -362,7 +362,7 @@ func TestFiltersVerdicts(t *testing.T) {
 		// dip37
 		"wh_loss": true, "rearm_wh_loss": true, "holder_loss": true, "m2_unseen": true, "wh_other": true, "wh_logmode": true, "hl_logmode": true, "h2": true, "skip2_live": true,
 		// v5 (dip47)
-		"grp_t2": true, "rearm_cap": true, "pause_window": true, "rfleet_live": true}
+		"grp_t2": true, "rearm_cap": true, "pause_window": true, "rfleet_live": true, "mint_ledger": true, "fanout_live": true}
 	for k, v := range fltVerdicts {
 		if !known[k] || v.label == "" || v.why == "" || len(v.label) > 10 {
 			t.Errorf("verdict %q: %+v", k, v)
