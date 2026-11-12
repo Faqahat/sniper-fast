@@ -198,6 +198,20 @@ var _ = func() bool {
 				th, _ := mNum(x, "thr")
 				return true, fmt.Sprintf("fresh %.1f%% >= %.0f%%", p, th)
 			}},
+		// dip50 GRX: fast-selling holders who bought after the trigger were in at our landing (the early-exit flag). The row shows the
+		// flagged fills' real P&L: while GRX is in log mode that is what the early exit has to beat; live, what it still left.
+		LogRule{Key: "grx", Code: "GX", Name: "rival ahead (log)", Short: "rival ahead", ModeKey: "grx", Verdict: "LOG new", Why: "GRX early exit (dip50)",
+			Note:    "measured (real fills); T2 fills with entrant risk >= the threshold at landing (grx.would_exit)",
+			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "grx") != nil },
+			Flag: func(_ *RuleState, f map[string]any) (bool, string) {
+				x := mObj(f, "grx")
+				if x == nil || !mBool(x, "would_exit") {
+					return false, ""
+				}
+				p, _ := mNum(x, "ent_pct")
+				n, _ := mNum(x, "ent_n")
+				return true, fmt.Sprintf("rivals ahead %.1f%% (%.0f)", p, n)
+			}},
 		LogRule{Key: "rgate", Code: "RG", Name: "rival gate (log)", Short: "rival gate", ModeKey: "rival_gate", Verdict: "LOG new", Why: "RIVAL GATE T2 (dip49)",
 			Note:    "measured (real fills); the filling T2 try had rivals <= R0, or <= R2 with a young dev (rival_gate.blocked; fail-open not counted)",
 			Present: func(_ *RuleState, f map[string]any) bool { return mObj(f, "rival_gate") != nil },

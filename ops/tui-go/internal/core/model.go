@@ -31,7 +31,7 @@ func KindOf(client string) string {
 }
 
 // EXIT_SHORT: exit reasons in short form.
-var exitShort = map[string]string{"take-profit": "TP", "stop-loss": "SL", "time-limit": "time", "time": "time"}
+var exitShort = map[string]string{"take-profit": "TP", "stop-loss": "SL", "time-limit": "time", "time": "time", "grx": "rival"} // grx (dip50): the rival-ahead early exit
 
 // ExitShort is EXIT_SHORT.get(why, fallback).
 func ExitShort(why string, fallback string) string {

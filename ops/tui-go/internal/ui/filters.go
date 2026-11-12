@@ -302,7 +302,7 @@ var fltWhats = map[string]string{
 	"crlog": "creator ledger would-skip", "ga": "2+ top holders left before we landed", "gd": "a top-5 guard holder left before we landed",
 	"mintled": "we already lost on this token", "fanout": "whale spread over many wallets", "fpstrict": "stricter no-follower-bot model",
 	"grpsign": "fast-selling holders in when the try was signed", "rfleet": "re-arm: wait for the bot fleet", "fresh48": "too many brand-new holders",
-	"rgate": "no rivals bidding / young dev wallet", "farm": "farm floor", "wh_other": "whale ledger, other rule", "wh_logmode": "whale ledger in log mode", "hl_logmode": "holder ledger in log mode",
+	"rgate": "no rivals bidding / young dev wallet", "farm": "farm floor", "grx": "fast rivals got in ahead of us (early-exit flag)", "wh_other": "whale ledger, other rule", "wh_logmode": "whale ledger in log mode", "hl_logmode": "holder ledger in log mode",
 }
 
 func fltWhat(key, fallback string) string {
