@@ -284,8 +284,8 @@ pub mod psflow48;
 // dip49: the T2 RIVAL GATE (per try; log / live) and the re-arm fresh-holders f1 definition
 #[path = "psrival49.rs"]
 pub mod psrival49;
-const D49FLAGS: [&str; 5] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def",
-    "--presend-live-devage-rpc"];
+const D49FLAGS: [&str; 6] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def",
+    "--presend-live-devage-rpc", "--presend-live-devage-fallback"];
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -614,6 +614,9 @@ pub struct Cfg {
     pub fresh_ra_f1: bool,
     /// dip49b --presend-live-devage-rpc URL (None: the funder log's setting); never printed
     pub devage_rpc: Option<String>,
+    /// dip49c --presend-live-devage-fallback payer|none (payer): an EMPTY creator history falls back to the create's fee payer (both empty:
+    /// age 0); none = dip49b (an empty creator = unknown, the rugdet replay's treatment)
+    pub devage_payer: bool,
 }
 
 /// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
@@ -817,6 +820,7 @@ impl Cfg {
             rival_live: match arg(psrival49::FLAG_MODE).as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("{} {x}: log | live", psrival49::FLAG_MODE) },
             rival_slots: match arg(psrival49::FLAG_SLOTS) { None => 20, Some(v) => v.parse::<u64>().ok().filter(|n| (1..=60).contains(n)).with_context(|| format!("{} {v}: slots 1..60", psrival49::FLAG_SLOTS))? },
             devage_rpc: arg(psrival49::FLAG_RPC).filter(|u| !u.starts_with("--")),
+            devage_payer: match arg("--presend-live-devage-fallback").as_deref() { None | Some("payer") => true, Some("none") => false, Some(x) => bail!("--presend-live-devage-fallback {x}: payer | none") },
             fresh_ra_f1: match arg(psrival49::FLAG_RADEF).as_deref() { None | Some("f3") => false, Some("f1") => true, Some(x) => bail!("{} {x}: f1 | f3", psrival49::FLAG_RADEF) },
             fresh_live: match arg("--presend-live-fresh-skip-mode").as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("--presend-live-fresh-skip-mode {x}: log | live") },
             funder_rpc: arg("--presend-live-funder-rpc").filter(|u| !u.starts_with("--")),
@@ -826,7 +830,7 @@ impl Cfg {
         };
         // dip47: the hold clocks it reads are kept only with the annotations on
         if has(psrival49::FLAG_RPC) && c.devage_rpc.is_none() { bail!("{} needs a URL (${{VAR}} expanded)", psrival49::FLAG_RPC); }
-        if c.rival_gate.is_none() { if let Some(f) = [psrival49::FLAG_MODE, psrival49::FLAG_SLOTS, psrival49::FLAG_RPC].iter().find(|f| has(f)) { bail!("{f} needs {} R0:R2:AGE_H", psrival49::FLAG); } }
+        if c.rival_gate.is_none() { if let Some(f) = [psrival49::FLAG_MODE, psrival49::FLAG_SLOTS, psrival49::FLAG_RPC, "--presend-live-devage-fallback"].iter().find(|f| has(f)) { bail!("{f} needs {} R0:R2:AGE_H", psrival49::FLAG); } }
         if has(psrival49::FLAG_RADEF) && c.fresh_skip.is_none() { bail!("{} needs --presend-live-fresh-skip T2PCT:RAPCT", psrival49::FLAG_RADEF); }
         if has("--presend-live-fresh-skip-mode") && c.fresh_skip.is_none() { bail!("--presend-live-fresh-skip-mode needs --presend-live-fresh-skip T2PCT:RAPCT"); }
         if c.fresh_skip.is_some() && !c.f3_log { bail!("--presend-live-fresh-skip needs --presend-live-f3-log (the fresh-holders metric it acts on is computed there)"); }
@@ -2878,7 +2882,8 @@ impl PsLive {
             let url = match p.cfg.devage_rpc.as_ref().or(p.cfg.funder_rpc.as_ref()).or(p.cfg.fam_rpc.as_ref()) { Some(u) => config::expand(u), None => PRIMARY_URL.get().cloned() };
             let src = if p.cfg.devage_rpc.is_some() { psrival49::FLAG_RPC } else if p.cfg.funder_rpc.is_some() { "--presend-live-funder-rpc" } else if p.cfg.fam_rpc.is_some() { "--presend-live-fam-rpc" } else { "rpc_url" };
             if url.is_none() { eprintln!("DIP49 RIVAL GATE: no RPC for the dev-age lookups ({src} empty / its variable missing): every dev age is UNKNOWN (only rivals <= R0 can block)"); }
-            else { eprintln!("DIP49 RIVAL GATE: dev-age lookups on {src} (getSignaturesForAddress(creator, limit 1000), retries after 1 / 3 / 8 s, one more at the T2 trigger)"); }
+            else { eprintln!("DIP49 RIVAL GATE: DEVAGE rpc host {} ({src}) | getSignaturesForAddress(creator, limit 1000) -> the create's payer when the creator is empty ({}) | retries after 1 / 3 / 8 s, one more at the T2 trigger",
+                psrival49::url_host(url.as_deref().unwrap_or("")), if p.cfg.devage_payer { "on" } else { "off" }); }
             p.rg49 = psrival49::Rg49::start(url, p.cfg.funder_rps);
             eprintln!("DIP49 RIVAL GATE ({}): T2 tries withheld when rivals <= R0 or (rivals <= R2 and dev age < AGE_H h), {:?}, rivals in the last {} slots", if p.cfg.rival_live { "LIVE" } else { "log" }, p.cfg.rival_gate.unwrap(), p.cfg.rival_slots);
         }
@@ -3132,7 +3137,12 @@ impl PsLive {
         if self.rm.is_some() { self.rearm_slot(a.slot, a.t_rx, &launch_of, reactive_open); }
         for c in &x.creates { self.det.create(c.mint, a.slot, c.creator, c.user, x.mayhem); }
         // dip49 RIVAL GATE: a followed token's creator age, looked up once (nothing with the gate off)
-        if self.rg49.is_some() && !x.mayhem { for c in &x.creates { self.rg49_create(c.mint, c.creator, a.tx.sig, a.t_rx); } }
+        if self.rg49.is_some() && !x.mayhem {
+            // dip49c: the create tx's fee payer (the creator's fallback when the creator never signed)
+            let payer = a.tx.keys.first().copied().unwrap_or_default();
+            let fb = self.cfg.devage_payer;
+            for c in &x.creates { if let Some(r) = self.rg49.as_mut() { r.create_p(c.mint, c.creator, if payer == [0u8; 32] { c.user } else { payer }, a.tx.sig, a.t_rx as f64 / 1e9, fb); } }
+        }
         // dip42 Q1 (log-only): the creates to its thread (nothing with it off)
         if let Some(q) = self.q1.as_mut() { for c in &x.creates { q.create(c.mint, a.slot, x.mayhem); } }
         // dip38: the launchers (the create tx's fee payer; nothing with the blocklist's launcher match and the logs off)

@@ -59,7 +59,8 @@ pub struct Pay { pub p: u64, pub last: u64, pub prev: u64 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RgSnap { pub on: bool, pub age_h: f32, pub src: u8, pub n: u8, pub e: [Pay; NPAY] }
 impl Default for RgSnap { fn default() -> RgSnap { RgSnap { on: false, age_h: f32::NAN, src: 0, n: 0, e: [Pay::default(); NPAY] } } }
-pub const SRC: [&str; 5] = ["none", "rpc", "capped", "error", "pending"];
+/// dev_age_src: 1 the creator's history, 5 the create's fee PAYER's (the creator never signed: a platform launch), 6 both empty (age 0)
+pub const SRC: [&str; 7] = ["none", "creator", "capped", "error", "pending", "payer", "empty0"];
 impl RgSnap {
     /// distinct payers with a fail in [s - slots, s - 1]
     pub fn rivals(&self, s: u64, slots: u64) -> u32 {
@@ -173,9 +174,11 @@ impl SendRg {
 
 /// a creator's oldest tx before a create: Oldest(blockTime s; = the create's own time when the create was its first tx), Capped, Err
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Dev { Oldest(f64), Capped, Err }
+pub enum Dev { Oldest(f64, u8), Capped, Err }
 #[derive(Clone, Debug)]
-pub struct DJob { pub creator: Pk, pub sig: [u8; 64], pub t: f64, pub tries: u8, pub due: Option<Instant> }
+pub struct DJob { pub creator: Pk, pub sig: [u8; 64], pub t: f64, pub tries: u8, pub due: Option<Instant>,
+    /// dip49c: the create tx's fee payer (= the creator on a normal launch) and whether an empty creator falls back to it
+    pub payer: Pk, pub fallback: bool }
 pub type Src<'a> = dyn Fn(&str, serde_json::Value) -> std::result::Result<serde_json::Value, String> + 'a;
 
 /// one lookup -> (the answer, the error text (rpc-scrubbed) when it failed). dip49b: NO `before` (dip49's `before: <create sig>` failed on
@@ -183,19 +186,34 @@ pub type Src<'a> = dyn Fn(&str, serde_json::Value) -> std::result::Result<serde_
 /// old; else the OLDEST entry's blockTime (the newest-first list's last; txs after the create only push nothing older) -> age = create time -
 /// that, >= 0 (the create itself the oldest / only txs at or after the create: ~0 = brand new); an empty list (not indexed yet) or a
 /// missing blockTime = an error (retried)
-pub fn dev_lookup(src: &Src, j: &DJob) -> (Dev, Option<String>) {
-    let p = serde_json::json!([b58(&j.creator), {"limit": 1000, "commitment": "confirmed"}]);
+/// one address's history: Ok(None) = empty, Ok(Some(Capped | Oldest(bt))) or the error text
+fn hist(src: &Src, a: &Pk, t: f64, tag: u8) -> std::result::Result<Option<Dev>, String> {
+    let p = serde_json::json!([b58(a), {"limit": 1000, "commitment": "confirmed"}]);
     match src("getSignaturesForAddress", p) {
         Ok(v) => match v.as_array() {
-            Some(a) if a.len() >= 1000 => (Dev::Capped, None),
-            Some(a) if a.is_empty() => (Dev::Err, Some("empty signature list (not indexed yet)".into())),
-            Some(a) => match a.last().and_then(|x| x["blockTime"].as_f64()) {
-                Some(bt) => (Dev::Oldest(bt.min(j.t)), None),
-                None => (Dev::Err, Some("no blockTime on the oldest signature".into())),
-            },
-            None => (Dev::Err, Some(format!("not a list: {}", v.to_string().chars().take(120).collect::<String>()))),
+            Some(x) if x.len() >= 1000 => Ok(Some(Dev::Capped)),
+            Some(x) if x.is_empty() => Ok(None),
+            Some(x) => x.last().and_then(|y| y["blockTime"].as_f64()).map(|bt| Some(Dev::Oldest(bt.min(t), tag))).ok_or_else(|| "no blockTime on the oldest signature".to_string()),
+            None => Err(format!("not a list: {}", v.to_string().chars().take(120).collect::<String>())),
         },
-        Err(e) => (Dev::Err, Some(rpc::scrub(&e).chars().take(200).collect())),
+        Err(e) => Err(rpc::scrub(&e).chars().take(200).collect()),
+    }
+}
+/// dip49c: the creator's history first; EMPTY (r88: a launch platform's creator address never signs) and the create's payer differs -> the
+/// PAYER's history (`fallback`); both empty -> after the retries: age 0 ("empty0", a brand-new address). Without the fallback an empty
+/// creator stays an error (= unknown: the rugdet replay's treatment of creators with no history). Errors / empties are retried (dev_work)
+pub fn dev_lookup(src: &Src, j: &DJob) -> (Dev, Option<String>) {
+    match hist(src, &j.creator, j.t, 1) {
+        Ok(Some(d)) => (d, None),
+        Err(e) => (Dev::Err, Some(e)),
+        Ok(None) if j.fallback && j.payer != j.creator => match hist(src, &j.payer, j.t, 5) {
+            Ok(Some(d)) => (d, None),
+            Err(e) => (Dev::Err, Some(format!("creator empty; payer: {e}"))),
+            Ok(None) if (j.tries as usize) >= RETRY_S.len() => (Dev::Oldest(j.t, 6), None),
+            Ok(None) => (Dev::Err, Some("creator and payer: empty signature lists (not indexed yet)".into())),
+        },
+        Ok(None) if j.fallback && (j.tries as usize) >= RETRY_S.len() => (Dev::Oldest(j.t, 6), None),
+        Ok(None) => (Dev::Err, Some("empty signature list (creator never signed / not indexed yet)".into())),
     }
 }
 
@@ -241,12 +259,16 @@ pub struct Rg49 {
     pending: FxHashSet<Pk>,
     /// per creator the create it was asked for (the T2 trigger's extra try)
     pub create_sig: FxHashMap<Pk, ([u8; 64], f64)>,
+    /// dip49c: per creator the create's fee payer and the fallback setting
+    pub payers: FxHashMap<Pk, (Pk, bool)>,
     pub dsh: Arc<DevSh>,
     drx: crossbeam_channel::Receiver<(Pk, Dev, Option<String>)>,
     dtx: crossbeam_channel::Sender<(Pk, Dev, Option<String>)>,
     /// per window its fill's verdict (the realized record's)
     pub done: FxHashMap<u64, serde_json::Value>,
     pub n_fails: u64, pub n_matched: u64,
+    /// dip49c: the first successful lookup was announced
+    pub first_ok: bool,
 }
 const DEV_Q: usize = 4096;
 const DEV_CACHE: usize = 100_000;
@@ -254,8 +276,8 @@ impl Rg49 {
     fn base(fails: crossbeam_channel::Receiver<arbx::feeds::RivalFail>, test_tx: Option<crossbeam_channel::Sender<arbx::feeds::RivalFail>>) -> Rg49 {
         let (dtx, drx) = crossbeam_channel::unbounded();
         Rg49 { fails, test_tx, mints: FxHashMap::default(), creates: FxHashMap::default(), creates_q: VecDeque::new(), dev: FxHashMap::default(), dev_err: FxHashMap::default(),
-            trig_retry: FxHashSet::default(), create_sig: FxHashMap::default(), pending: FxHashSet::default(),
-            dsh: Arc::new(DevSh::default()), drx, dtx, done: FxHashMap::default(), n_fails: 0, n_matched: 0 }
+            trig_retry: FxHashSet::default(), create_sig: FxHashMap::default(), payers: FxHashMap::default(), pending: FxHashSet::default(),
+            dsh: Arc::new(DevSh::default()), drx, dtx, done: FxHashMap::default(), n_fails: 0, n_matched: 0, first_ok: false }
     }
     /// the tests: a private fail channel, no workers
     pub fn idle() -> Rg49 { let (tx, rx) = crossbeam_channel::bounded(65_536); Rg49::base(rx, Some(tx)) }
@@ -281,13 +303,19 @@ impl Rg49 {
     pub fn pump(&mut self, src: &Src) { while dev_work(&self.dsh, src, Duration::ZERO, &self.dtx, 0.0) {} }
     /// a create of a followed token: its creator's age looked up once (queued; never waited for)
     pub fn create(&mut self, mint: Pk, creator: Pk, sig: [u8; 64], t: f64) {
+        self.create_p(mint, creator, creator, sig, t, false);
+    }
+    /// dip49c: with the create's fee payer and the payer fallback
+    pub fn create_p(&mut self, mint: Pk, creator: Pk, payer: Pk, sig: [u8; 64], t: f64, fallback: bool) {
         self.creates.insert(mint, (creator, t));
         self.creates_q.push_back(mint);
         while self.creates_q.len() > 200_000 { if let Some(o) = self.creates_q.pop_front() { self.creates.remove(&o); self.mints.remove(&o); } }
         if self.create_sig.len() > 200_000 { self.create_sig.clear(); }
         self.create_sig.insert(creator, (sig, t));
         if self.dev.contains_key(&creator) || !self.pending.insert(creator) { return; }
-        self.queue(DJob { creator, sig, t, tries: 0, due: None });
+        self.payers.insert(creator, (payer, fallback));
+        if self.payers.len() > 200_000 { self.payers.clear(); }
+        self.queue(DJob { creator, sig, t, tries: 0, due: None, payer, fallback });
     }
     fn queue(&mut self, j: DJob) {
         let mut q = self.dsh.q.lock().unwrap();
@@ -299,8 +327,15 @@ impl Rg49 {
         let Some((c, t)) = self.creates.get(mint).copied() else { return };
         if self.dev.get(&c) != Some(&Dev::Err) || !self.trig_retry.insert(c) || !self.pending.insert(c) { return; }
         let sig = self.create_sig.get(&c).map_or([0u8; 64], |x| x.0);
+        let (payer, fallback) = self.payers.get(&c).copied().unwrap_or((c, false));
         self.dev.remove(&c);
-        self.queue(DJob { creator: c, sig, t, tries: RETRY_S.len() as u8, due: None });
+        self.queue(DJob { creator: c, sig, t, tries: RETRY_S.len() as u8, due: None, payer, fallback });
+    }
+    /// the workers' answers into the cache (tests; the engine drains in rg49_drain)
+    pub fn drain_dev(&mut self) -> Vec<Pk> {
+        let mut v = Vec::new();
+        while let Ok((c, d, e)) = self.drx.try_recv() { self.pending.remove(&c); self.dev.insert(c, d); if let Some(e) = e { self.dev_err.insert(c, e); } v.push(c); }
+        v
     }
     /// the creator's last lookup error of a mint
     pub fn err_of(&self, mint: &Pk) -> Option<&String> { self.creates.get(mint).and_then(|(c, _)| self.dev_err.get(c)) }
@@ -308,7 +343,7 @@ impl Rg49 {
     pub fn age(&self, mint: &Pk) -> (f32, u8) {
         let Some((c, t)) = self.creates.get(mint) else { return (f32::NAN, 0) };
         match self.dev.get(c) {
-            Some(Dev::Oldest(bt)) => ((((t - bt) / 3600.0).max(0.0)) as f32, 1),
+            Some(Dev::Oldest(bt, src)) => ((((t - bt) / 3600.0).max(0.0)) as f32, *src),
             Some(Dev::Capped) => (1e6, 2),
             Some(Dev::Err) => (f32::NAN, 3),
             None => (f32::NAN, if self.pending.contains(c) { 4 } else { 0 }),
@@ -355,13 +390,22 @@ impl PsLive {
         if any { self.sh.rg.last_fail.store(arbx::fast::mono_ns().max(1), Ordering::Relaxed); }
         let r = self.rg49.as_mut().unwrap();
         let mut errs: Vec<(Pk, String)> = Vec::new();
+        let mut first: Option<(Pk, Dev)> = None;
         while let Ok((c, d, e)) = r.drx.try_recv() {
             r.pending.remove(&c);
             r.dev.insert(c, d);
+            if !r.first_ok && d != Dev::Err { r.first_ok = true; first = Some((c, d)); }
             match e { Some(e) => { r.dev_err.insert(c, e.clone()); errs.push((c, e)); } None => { r.dev_err.remove(&c); } }
             if r.dev_err.len() > DEV_CACHE { r.dev_err.clear(); }
             if r.dev.len() > DEV_CACHE { r.dev.clear(); }
             for (m, (cr, _)) in r.creates.iter() { if *cr == c && self.armed.contains_key(m) { touched.push(*m); } }
+        }
+        // dip49c: the run's first successful lookup (verify within a minute of the start)
+        if let Some((c, d)) = first {
+            let ct = self.rg49.as_ref().and_then(|r| r.creates.values().find(|x| x.0 == c).map(|x| x.1)).unwrap_or(0.0);
+            let (age, src) = match d { Dev::Oldest(bt, s) => (format!("{:.3} h", ((ct - bt) / 3600.0).max(0.0)), SRC[s as usize]), Dev::Capped => ("capped (old)".into(), "capped"), Dev::Err => ("-".into(), "error") };
+            self.line(format!("  DEVAGE OK first lookup src={src} age={age} creator {}", &b58(&c)[..8]));
+            self.rec(serde_json::json!({"ev": "presend_live_devage", "ok": true, "first": true, "creator": b58(&c), "src": src, "t": arbx::feeds::clock::now_ns()}));
         }
         // dip49b: a lookup that failed for good (retries spent): its error, recorded once per creator
         for (c, e) in errs {
@@ -399,4 +443,60 @@ pub fn f1_of<'a>(holders: impl Iterator<Item = (&'a Pk, f64, u8)>, excl: &[Pk]) 
 pub fn f1_fresh(det: &pl::Detector, mint: &Pk, user: &Pk, excl: &[Pk], slot: u64) -> (f64, usize) {
     let hc = det.holder_clocks(mint, (0.02 * pl::SUPPLY) as i64, user, slot, 12);
     f1_of(hc.iter().map(|h| (&h.w, h.bal as f64 / pl::SUPPLY * 100.0, h.n)), excl)
+}
+
+// ---- dip49c: the production lookup path, standalone (--devage-selftest FILE) --------------------------------------------------------
+
+/// the URL's host only (the key / path never printed)
+pub fn url_host(u: &str) -> String { u.split("://").nth(1).unwrap_or(u).split(['/', '?', '@']).next().unwrap_or("").to_string() }
+
+/// `snipe_engine --devage-selftest FILE [--presend-live-devage-rpc URL] [--presend-live-funder-rps N] [--presend-live-devage-fallback payer|none]`:
+/// the EXACT production dev-age path (Rg49::start: the same workers, RPC client, pacing, retries 1 / 3 / 8 s, creator -> payer fallback,
+/// `${VAR}` expansion after the engine's .env load) on rows {mint, creator, payer, create_sig | sig, create_bt | bt} (one JSON per line).
+/// No wallet, keystore, feed or send. One line per row, then a summary; exits when every row is answered (or after the deadline)
+pub fn selftest(file: &str, url: Option<String>, rps: u32, fallback: bool) -> Result<()> {
+    let raw = url.context("--devage-selftest needs --presend-live-devage-rpc URL (${VAR} expanded from the .env)")?;
+    let url = config::expand(&raw).context("--presend-live-devage-rpc: a ${VAR} in it is empty / missing (is the .env loaded? --env-file)")?;
+    println!("DEVAGE SELFTEST rpc host {} | rps {rps} | fallback {} | retries after {:?} s", url_host(&url), if fallback { "payer" } else { "none" }, RETRY_S);
+    let pk = |s: &str| -> Option<Pk> { bs58::decode(s).into_vec().ok().and_then(|v| <[u8; 32]>::try_from(v).ok()) };
+    let mut rows: Vec<(Pk, Pk, Pk, [u8; 64], f64, String)> = Vec::new();
+    for (k, l) in std::fs::read_to_string(file).with_context(|| format!("read {file}"))?.lines().enumerate() {
+        if l.trim().is_empty() { continue; }
+        let v: serde_json::Value = serde_json::from_str(l).with_context(|| format!("{file}:{}: not JSON", k + 1))?;
+        let g = |a: &str, b: &str| v.get(a).or_else(|| v.get(b)).cloned().unwrap_or(serde_json::Value::Null);
+        let (Some(m), Some(c)) = (v["mint"].as_str().and_then(pk), v["creator"].as_str().and_then(pk)) else { println!("row {}: no mint / creator: skipped", k + 1); continue };
+        let p = v["payer"].as_str().and_then(pk).or_else(|| v["user"].as_str().and_then(pk)).unwrap_or(c);
+        let sig: [u8; 64] = g("create_sig", "sig").as_str().and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|x| x.try_into().ok()).unwrap_or([0u8; 64]);
+        let bt = g("create_bt", "bt").as_f64().unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64()));
+        rows.push((m, c, p, sig, bt, v["mint"].as_str().unwrap_or("").chars().take(8).collect()));
+    }
+    let Some(mut r) = Rg49::start(Some(url), rps) else { bail!("the dev-age workers did not start") };
+    let t0 = Instant::now();
+    let mut asked: FxHashMap<Pk, Instant> = FxHashMap::default();
+    for (m, c, p, sig, bt, _) in &rows { asked.entry(*c).or_insert_with(Instant::now); r.create_p(*m, *c, *p, *sig, *bt, fallback); }
+    let mut got: FxHashMap<Pk, f64> = FxHashMap::default();
+    let deadline = Duration::from_secs_f64(30.0 + RETRY_S.iter().sum::<u64>() as f64 + asked.len() as f64 * 3.0 / rps.max(1) as f64);
+    while got.len() < asked.len() && t0.elapsed() < deadline {
+        for c in r.drain_dev() { got.entry(c).or_insert_with(|| asked.get(&c).map_or(0.0, |a| a.elapsed().as_secs_f64() * 1e3)); }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let mut by: std::collections::BTreeMap<&str, usize> = Default::default();
+    let mut errs: std::collections::BTreeMap<String, usize> = Default::default();
+    for (m, c, p, _, _, ms) in &rows {
+        let (age, src) = r.age(m);
+        let s = if got.contains_key(c) { SRC[src as usize] } else { "timeout" };
+        *by.entry(s).or_default() += 1;
+        let e = r.dev_err.get(c).cloned().unwrap_or_default();
+        if !e.is_empty() { *errs.entry(e.chars().take(80).collect()).or_default() += 1; }
+        println!("{ms} creator {} payer {}{} | age_h {} | src {s} | {} ms{}", &b58(c)[..8], &b58(p)[..8], if c == p { " (=creator)" } else { "" },
+            if age.is_finite() { format!("{age:.3}") } else { "-".into() }, got.get(c).map_or("-".into(), |x| format!("{x:.0}")), if e.is_empty() { String::new() } else { format!(" | err {e}") });
+    }
+    let n = rows.len().max(1);
+    let ok = by.iter().filter(|(k, _)| matches!(**k, "creator" | "payer" | "empty0" | "capped")).map(|(_, v)| *v).sum::<usize>();
+    println!("DEVAGE SELFTEST SUMMARY: {} rows, {} creators | resolved {ok} ({:.1}%) | {} | calls {} errs {} retries {} | {:.1} s",
+        rows.len(), asked.len(), ok as f64 * 100.0 / n as f64,
+        by.iter().map(|(k, v)| format!("{k} {v} ({:.0}%)", *v as f64 * 100.0 / n as f64)).collect::<Vec<_>>().join(", "),
+        r.dsh.calls.load(Ordering::Relaxed), r.dsh.errs.load(Ordering::Relaxed), r.dsh.retries.load(Ordering::Relaxed), t0.elapsed().as_secs_f64());
+    for (e, k) in &errs { println!("  error x{k}: {e}"); }
+    Ok(())
 }

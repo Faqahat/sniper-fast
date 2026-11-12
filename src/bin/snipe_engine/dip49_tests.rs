@@ -129,6 +129,7 @@ fn dip49_engine_path_and_worker() {
     p.tick(n + 1, None);
     let s = w(&p);
     assert!((s.age_h - 1.0).abs() < 1e-3 && s.src == 1, "{s:?}");
+    assert_eq!(SRC[s.src as usize], "creator");
     // the OLDEST entry is 1 h before: not young (< 1 h is young) -> sent; with AGE_H 2 by the hot spec -> withheld
     assert!(!gate(&p.sh.rg, &s, false, n + 1, now).unwrap().withhold());
     p.ctl47_apply(&psctl47::ctl47_parse(br#"{"rival_gate_spec": "0:2:2", "rival_gate": "live"}"#).unwrap(), "t");
@@ -143,7 +144,7 @@ fn dip49_engine_path_and_worker() {
     let cap = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Ok(serde_json::Value::Array(vec![serde_json::json!({"blockTime": 1}); 1000])) };
     let err = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Err("-32020 history not available".into()) };
     let none = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Ok(serde_json::json!([])) };
-    let j = DJob { creator: [1u8; 32], sig: [2u8; 64], t: 100.0, tries: 0, due: None };
+    let j = DJob { creator: [1u8; 32], sig: [2u8; 64], t: 100.0, tries: 0, due: None, payer: [1u8; 32], fallback: false };
     assert_eq!((dev_lookup(&cap, &j).0, dev_lookup(&err, &j), dev_lookup(&none, &j).0), (Dev::Capped, (Dev::Err, Some("-32020 history not available".to_string())), Dev::Err));
     // the fill record carries the filling try's verdict; the realized record the compact one
     let _ = orx.try_iter().count();
@@ -289,10 +290,53 @@ fn dip49b_9ye53_dev_age_offline() {
     let first_bt = 1_794_443_385u64; let cbt = 1_794_446_703.0f64;
     let sigs: Vec<serde_json::Value> = (0..9u64).map(|k| serde_json::json!({"signature": format!("s{k}"), "blockTime": if k == 8 { first_bt } else { 1_794_446_703 - k * 100 }})).collect();
     let src = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Ok(serde_json::Value::Array(sigs.clone())) };
-    let j = DJob { creator: pk("C6XLWkbjDcbACo6xuaXqReq52b7AqAhngP673NuxA6dH"), sig: [0u8; 64], t: cbt, tries: 0, due: None };
+    let j = DJob { creator: pk("C6XLWkbjDcbACo6xuaXqReq52b7AqAhngP673NuxA6dH"), sig: [0u8; 64], t: cbt, tries: 0, due: None, payer: pk("C6XLWkbjDcbACo6xuaXqReq52b7AqAhngP673NuxA6dH"), fallback: true };
     let (d, e) = dev_lookup(&src, &j);
-    let Dev::Oldest(bt) = d else { panic!("{d:?} {e:?}") };
+    let Dev::Oldest(bt, 1) = d else { panic!("{d:?} {e:?}") };
     let age = (cbt - bt) / 3600.0;
     eprintln!("dip49b 9Ye53E65 dev age {age:.4} h (rugdet 0.92)");
     assert!((age - 0.9217).abs() < 0.001);
 }
+
+/// dip49c: the creator never signed (empty history, r88's platform launches) -> the create's fee PAYER's age ("payer"); both empty (after the
+/// retries) -> age 0 ("empty0"); a normal launch -> the creator's; --presend-live-devage-fallback none -> an empty creator stays unknown
+#[test]
+fn dip49c_payer_fallback() {
+    let (creator, payer) = ([0xC1u8; 32], [0x9Au8; 32]);
+    let t = 10_000.0;
+    let mk = |fb: bool, tries: u8| DJob { creator, sig: [0u8; 64], t, tries, due: None, payer, fallback: fb };
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let payer_hist = |_: &str, p: serde_json::Value| -> std::result::Result<serde_json::Value, String> {
+        calls.borrow_mut().push(p[0].as_str().unwrap().to_string());
+        if p[0] == b58(&creator).as_str() { Ok(serde_json::json!([])) } else { Ok(serde_json::json!([{"signature": "a", "blockTime": 9_000u64}, {"signature": "b", "blockTime": 3_400u64}])) }
+    };
+    let (d, e) = dev_lookup(&payer_hist, &mk(true, 0));
+    assert_eq!((d, e), (Dev::Oldest(3_400.0, 5), None));
+    assert_eq!(*calls.borrow(), vec![b58(&creator), b58(&payer)], "the creator first, then the payer");
+    let both_empty = |_: &str, _: serde_json::Value| -> std::result::Result<serde_json::Value, String> { Ok(serde_json::json!([])) };
+    assert_eq!(dev_lookup(&both_empty, &mk(true, 0)).0, Dev::Err, "retried first (the payer's newest tx may not be indexed yet)");
+    assert_eq!(dev_lookup(&both_empty, &mk(true, RETRY_S.len() as u8)), (Dev::Oldest(t, 6), None), "retries spent: age 0, empty0");
+    assert_eq!(dev_lookup(&payer_hist, &mk(false, 0)).0, Dev::Err, "fallback off: an empty creator stays unknown");
+    // through the engine's cache: the window's age and source
+    let mut r = Rg49::idle();
+    r.create_p([0x31u8; 32], creator, payer, [0u8; 64], t, true);
+    r.pump(&payer_hist);
+    let rx: Vec<_> = r_drain(&mut r);
+    assert_eq!(rx.len(), 1);
+    let (a, src) = r.age(&[0x31u8; 32]);
+    assert!((a - (t - 3_400.0) as f32 / 3600.0).abs() < 1e-4 && SRC[src as usize] == "payer");
+    let mut r = Rg49::idle();
+    r.create_p([0x32u8; 32], creator, payer, [0u8; 64], t, true);
+    r.pump(&both_empty);
+    r_drain(&mut r);
+    assert_eq!(r.age(&[0x32u8; 32]), (0.0, 6));
+    assert_eq!(SRC[6], "empty0");
+    // the flag
+    let c = cfg(&["--presend-live-rival-gate", "0:2:1"]).unwrap().unwrap();
+    assert!(c.devage_payer);
+    assert!(!cfg(&["--presend-live-rival-gate", "0:2:1", "--presend-live-devage-fallback", "none"]).unwrap().unwrap().devage_payer);
+    assert!(cfg(&["--presend-live-rival-gate", "0:2:1", "--presend-live-devage-fallback", "x"]).is_err());
+    assert!(cfg(&["--presend-live-devage-fallback", "none"]).is_err());
+}
+/// the workers' answers into the cache (the main loop's drain, without a probe)
+fn r_drain(r: &mut Rg49) -> Vec<Pk> { r.drain_dev() }

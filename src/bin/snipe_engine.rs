@@ -1731,6 +1731,12 @@ fn main() -> Result<()> {
     // provider secrets (e.g. CONSTANTK_TOKEN) into the process env, so a [[send]] url with ${...} expands.
     let envf = arg("--env-file").unwrap_or_else(|| "/root/sniper/deploy/.env".to_string());
     let _ = dotenvy::from_filename(&envf).or_else(|_| dotenvy::dotenv());
+    // dip49c --devage-selftest FILE: the production dev-age lookups on recorded launches (no wallet / feed / send), then exit
+    if let Some(f) = arg("--devage-selftest") {
+        let rps = arg("--presend-live-funder-rps").and_then(|v| v.parse().ok()).unwrap_or(15);
+        let fb = arg("--presend-live-devage-fallback").as_deref() != Some("none");
+        return dipmode::devage_selftest(&f, arg("--presend-live-devage-rpc"), rps, fb);
+    }
     check_safety_flags()?;
     alpenglow_warning();
     // --telegram-test: one message to the chat (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from the env file), then exit

@@ -92,3 +92,31 @@ the try is WITHHELD (`dip49_9ye53_withheld`).
     lookup that always fails ends with its scrubbed text recorded. The T2 trigger's extra try happens once.
   * `dip49b_9ye53_dev_age_offline`: the creator C6XLWkbj's cached history (oldest blockTime 1794443385, create 1794446703) gives
     0.9217 h, which is rugdet's 0.92.
+
+## dip49c: the payer fallback, a self-test, and the start / first-success lines
+
+* **Cause** (r88: every lookup returned "empty signature list"). On platform launches the token's creator is an address that never signs,
+  so its history is empty and stays empty; retrying cannot fix it.
+* **Fix.** The create tx's fee payer is recorded at the create. The lookup reads the CREATOR's history first.
+  * If it is empty and the payer differs, the lookup reads the PAYER's history.
+  * If both are still empty after the retries, the age is 0 (a brand-new address).
+  * `dev_age_src` is `creator` | `payer` | `empty0` | `capped` | `error`.
+  * `--presend-live-devage-fallback payer|none` defaults to payer. `none` is dip49b: an empty creator stays unknown, which is how the
+    rugdet replay treated the 96 fills whose creator had no cached history.
+  * A creator that has txs only at or after the create reads as age 0. That is the same as rugdet's `n_prior = 0`.
+* **Live lines.**
+  * At start: `DIP49 RIVAL GATE: DEVAGE rpc host <host> (<flag>) …`, with the host only, never the key.
+  * The first answer: `DEVAGE OK first lookup src=… age=… creator …`, plus a `presend_live_devage {ok: true, first: true}` record.
+* **Self-test.** It runs the production path standalone: the same workers, RPC client, pacing, retries and fallback, and the same `${VAR}`
+  expansion after the engine's `.env` load (`--env-file`, default `/root/sniper/deploy/.env`). No wallet, keystore, feed or send.
+
+  ```
+  snipe_engine --devage-selftest launches.jsonl --presend-live-devage-rpc 'https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}' \
+      [--presend-live-funder-rps 15] [--presend-live-devage-fallback payer|none] [--env-file /root/sniper/deploy/.env]
+  ```
+
+  * Rows: one JSON per line, `{mint, creator, payer, sig | create_sig, bt | create_bt}`. The recorder's `launches.jsonl` lines work as is.
+  * Output: one line per row (age_h, src, error text, latency), then `DEVAGE SELFTEST SUMMARY` (% resolved, % per src, calls / errors /
+    retries) and each distinct error.
+  * Checked here on the public RPC (rps 2) with 19 launches from `run_20261112_0307`, including r88's 5PuRg77K, FW6U98K7 and 5VX7S1ap:
+    100% resolved (capped 8, creator 7, payer 4). The 11 rate-limit errors were all retried successfully.

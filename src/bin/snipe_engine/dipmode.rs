@@ -18,6 +18,8 @@ use arbx::dip_imit::{self as di, Imit, LaunchInfo, TokenBook, T};
 // PRE-SEND LIVE (--presend-live; ops/strategies/presend/LIVE.md): the capped live probe of pre-sent buys (off without the flag)
 #[path = "pslive.rs"]
 mod pslive;
+/// dip49c: `--devage-selftest FILE`: the production dev-age lookup path standalone (no wallet, feed or send)
+pub fn devage_selftest(file: &str, url: Option<String>, rps: u32, fallback: bool) -> Result<()> { pslive::psrival49::selftest(file, url, rps, fallback) }
 // SHRED FIRE (--dip-shred-fire; dip14; ops/dip/speed/fixes/FIXES.md): fire on the first shred sighting of a dump (off without the flag)
 #[path = "shredfire.rs"]
 mod shredfire;
