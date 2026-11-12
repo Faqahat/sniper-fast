@@ -398,6 +398,12 @@ pub fn tx_stream_item(u: UpdateTx, t: u64, rec: &crate::rec::Rec, roles: Option<
                 m.err.as_ref().map(|e| &e.err[..]).unwrap_or(&[]));
         }
     }
+    // dip49 RIVAL TAP (off unless snipe_engine --presend-live-rival-gate turned it on): a failed tx with a slippage-type error
+    if !ok && crate::feeds::RIVAL_TAP.get().is_some() {
+        if let (Some(m), Some(msg)) = (&meta, pb.message.as_ref()) {
+            if let Some(e) = m.err.as_ref() { crate::feeds::rival_tap_note(u.slot, &e.err, &msg.account_keys, (&lw, &lr)); }
+        }
+    }
     // dip36 FP-NOBOT (log-only; off unless snipe_engine --presend-fpnb-log on turned the tap on): every failed tx naming a Buy* / Sell*
     // instruction, any payer, to the FP-NOBOT thread (src/feeds/mod.rs fail_tap_note; a bounded try_send, never a wait)
     if !ok && crate::feeds::FAIL_TAP.get().is_some() {

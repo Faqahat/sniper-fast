@@ -161,6 +161,19 @@ fn sorted(m: &FxHashMap<&'static str, u64>) -> String {
 }
 
 impl PsLive {
+    /// dip49 the re-arm lane's fresh-holders value at slot `slot`: f3 (dip48) or f1 (--presend-live-fresh-skip-ra-def f1 / the hot key);
+    /// -> (pct, n, Some({def, f1_pct, f1_n, f3_pct, f3_n}) when the flag / key chose f1 or f1 was asked for the log)
+    pub(super) fn fresh_ra49(&self, mint: &Pk, dumper: &Pk, r5: Option<&serde_json::Value>, slot: u64) -> (f64, usize, Option<serde_json::Value>) {
+        let (f3, f3n) = f3_fresh(&self.det, mint, &self.user, dumper, slot);
+        let r5h: Option<Pk> = r5.and_then(|j| j["holder"].as_str()).and_then(|s| bs58::decode(s).into_vec().ok()).and_then(|v| <[u8; 32]>::try_from(v).ok());
+        let mut excl = vec![*dumper];
+        if let Some(h) = r5h { excl.push(h); }
+        let (f1, f1n) = psrival49::f1_fresh(&self.det, mint, &self.user, &excl, slot);
+        let use_f1 = self.f47.cur.map_or(self.cfg.fresh_ra_f1, |v| v.fresh_ra_f1);
+        let j = serde_json::json!({"def": if use_f1 { "f1" } else { "f3" }, "f1_pct": f1, "f1_n": f1n, "f3_pct": f3, "f3_n": f3n});
+        if use_f1 { (f1, f1n, Some(j)) } else { (f3, f3n, Some(j)) }
+    }
+
     /// dip26: window `w` is a re-arm window
     pub(super) fn rearm_w(&self, w: u64) -> bool { self.rm.as_ref().is_some_and(|r| r.is_win(w)) }
     /// dip26: what an attempt of window `w` spends (the pre-send size; a re-arm window's own size)
@@ -386,9 +399,11 @@ impl PsLive {
         // threshold -> the window is not armed (presend_live_skip "fresh_holders"); nothing without the flag / in log mode
         if self.cfg.fresh_skip.is_some() && self.cfg.f3_log {
             let slot = self.rm.as_ref().map_or(0, |r| r.clock);
-            let (fresh, fresh_n) = f3_fresh(&self.det, &mint, &self.user, &dump.tr.user, slot);
+            // dip49: the lane's definition (f3 = dip48; f1 = rugdet's: top 12, the dumper and the R5 holder out)
+            let (fresh, fresh_n, ex49) = self.fresh_ra49(&mint, &dump.tr.user, r5.as_ref(), slot);
             if let Some(x) = self.fresh48(true, fresh, fresh_n).filter(|x| x.3) {
-                let ex = serde_json::json!({"fresh": x.0, "fresh_n": x.1, "thr": x.2, "check_slot": chk_slot});
+                let mut ex = serde_json::json!({"fresh": x.0, "fresh_n": x.1, "thr": x.2, "check_slot": chk_slot});
+                if let Some(j) = ex49 { ex["fresh_def"] = j; }
                 self.rearm_skip("fresh_holders", &mint, &dump, ex);
                 return;
             }
@@ -419,7 +434,7 @@ impl PsLive {
         // dip37: the window's fee arm, once, now (None with the fee A/B off)
         let fab = self.fab_assign(id);
         self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
-            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint), bd: self.bd_snap(&mint), g43: self.g43_set(&mint), p46: None, rfl: self.rf47_snap(&mint) });
+            spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint), bd: self.bd_snap(&mint), g43: self.g43_set(&mint), p46: None, rfl: self.rf47_snap(&mint), rg: Default::default() });
         self.armed.insert(mint, id);
         self.f47_arm(id);
         let _ = self.fu47_event(id, &mint, "arm", dump.tr.s);
@@ -437,6 +452,7 @@ impl PsLive {
             "check_slot": chk_slot, "arm_slot": arm_slot, "en_slot": en_slot, "arm_ms_after_dump": (chk_t as i64 - dump.tr.t_rx as i64) as f64 / 1e6 + deferred_ms,
             "deferred_ms": deferred_ms, "deferred": deferred.map(|d| d.1), "k": k, "spend": spend, "drop": drop, "lim0": lim0, "dry": dry});
         if let Some(h) = &holders_arm { r["holders_arm"] = holders_json(h); }
+        let r5_arm = r5.clone();
         if let Some(j) = r5 { r["r5"] = j; }
         // dip27 (log-only): only with the annotations on (off: dip26's record)
         if self.cfg.ann { r["ann"] = ann_arm(&self.det, &self.user, &mint, arm_slot); }
@@ -446,7 +462,15 @@ impl PsLive {
             let (fresh, fresh_n) = f3_fresh(&self.det, &mint, &self.user, &dump.tr.user, arm_slot);
             r["f3"] = serde_json::json!({"fresh": fresh, "fresh_n": fresh_n});
             // dip48 fresh-holders skip (log mode / below): its verdict on the arm record, kept for the fill record
-            if let Some(x) = self.fresh48(true, fresh, fresh_n) { let j = psctl47::fresh_json(&x); r["fresh_skip"] = j.clone(); self.f47.fresh_w.insert(id, j); }
+            if self.cfg.fresh_skip.is_some() {
+                let (p, n, ex49) = self.fresh_ra49(&mint, &dump.tr.user, r5_arm.as_ref(), arm_slot);
+                if let Some(x) = self.fresh48(true, p, n) {
+                    let mut j = psctl47::fresh_json(&x);
+                    if let Some(e) = ex49 { j["def"] = e; }
+                    r["fresh_skip"] = j.clone(); self.f47.fresh_w.insert(id, j);
+                }
+            }
+            let _ = (fresh, fresh_n);
             if let Some(g) = tags_json(&self.det, &mint, &self.cfg.tag_wallets) { r["tags"] = g; }
         }
         // dip37: the window's fee arm and its values (only with the A/B on); the ledger's view of the dumper (only with it on)

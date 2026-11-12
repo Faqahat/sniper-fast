@@ -421,7 +421,7 @@ impl PsLive {
         let slot_ns = arbx::feeds::entries::SLOT_US.load(Ordering::Relaxed) * 1_000;
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, 1, slot_ns),
             n: 0, done: false, spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user), grd: Grd::default(),
-            fpg: None, fab: None, blk: None, bd: None, g43: self.g43_set(&t.mint), p46: Some(why), rfl: Default::default() };
+            fpg: None, fab: None, blk: None, bd: None, g43: self.g43_set(&t.mint), p46: Some(why), rfl: Default::default(), rg: Default::default() };
         self.sh.wins.lock().unwrap().push(sw);
         self.p46.wins.insert(id, PWin { mint: t.mint, whale, en_slot, why, trig_slot: t.s, sent: 0, stop_at: None });
         self.p46.by_mint.insert(t.mint, id);

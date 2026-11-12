@@ -440,6 +440,39 @@ pub fn fail_tap_note(slot: u64, idx: u64, logs: &[String], keys: &[Vec<u8>], loa
     }
 }
 
+/// dip49 RIVAL TAP (off unless snipe_engine --presend-live-rival-gate turned it on): every failed executed tx whose error is an
+/// InstructionError with a slippage-type Custom code (rugdet's `slipsg`: 6001 / 6002 / 6003 / 6024 / 6040 / 6042, any instruction), its fee
+/// payer and all its account keys (the mint is one of them; the engine matches its followed tokens). Bounded: a full channel drops (counted)
+pub struct RivalFail { pub slot: u64, pub payer: Pk, pub keys: Vec<Pk> }
+pub static RIVAL_TAP: std::sync::OnceLock<crossbeam_channel::Sender<RivalFail>> = std::sync::OnceLock::new();
+pub static RIVAL_TAP_SENT: AtomicU64 = AtomicU64::new(0);
+pub static RIVAL_TAP_DROPPED: AtomicU64 = AtomicU64::new(0);
+pub const SLIP_CODES: [u32; 6] = [6001, 6002, 6003, 6024, 6040, 6042];
+/// the tap on (once): the receiver
+pub fn rival_tap_on() -> Option<crossbeam_channel::Receiver<RivalFail>> {
+    let (tx, rx) = crossbeam_channel::bounded(65_536);
+    RIVAL_TAP.set(tx).ok().map(|_| rx)
+}
+/// the Custom code of an InstructionError (the bincode TransactionError bytes); None: another error
+pub fn custom_code(b: &[u8]) -> Option<u32> {
+    let u32_at = |i: usize| b.get(i..i + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap()));
+    (u32_at(0) == Some(8) && u32_at(5) == Some(25)).then(|| u32_at(9)).flatten()
+}
+/// the feed's side: a failed executed tx (its error bytes) -> the tap when the code is a slippage one
+#[inline]
+pub fn rival_tap_note(slot: u64, err: &[u8], keys: &[Vec<u8>], loaded: (&[Vec<u8>], &[Vec<u8>])) {
+    let Some(tx) = RIVAL_TAP.get() else { return };
+    let Some(c) = custom_code(err) else { return };
+    if !SLIP_CODES.contains(&c) { return; }
+    let to = |k: &Vec<u8>| -> Option<Pk> { k.as_slice().try_into().ok() };
+    let Some(payer) = keys.first().and_then(to) else { return };
+    let keys: Vec<Pk> = keys.iter().chain(loaded.0.iter()).chain(loaded.1.iter()).filter_map(to).collect();
+    match tx.try_send(RivalFail { slot, payer, keys }) {
+        Ok(()) => { RIVAL_TAP_SENT.fetch_add(1, Ordering::Relaxed); }
+        Err(_) => { RIVAL_TAP_DROPPED.fetch_add(1, Ordering::Relaxed); }
+    }
+}
+
 /// The process's PoH index
 pub fn poh_index() -> &'static PohIndex {
     static I: std::sync::LazyLock<PohIndex> = std::sync::LazyLock::new(PohIndex::new);

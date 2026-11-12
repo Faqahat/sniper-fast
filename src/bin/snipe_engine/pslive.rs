@@ -281,6 +281,10 @@ pub mod psfunder47;
 // dip48: the FOLLOWER-FLOW log (log only; off by default = dip47)
 #[path = "psflow48.rs"]
 pub mod psflow48;
+// dip49: the T2 RIVAL GATE (per try; log / live) and the re-arm fresh-holders f1 definition
+#[path = "psrival49.rs"]
+pub mod psrival49;
+const D49FLAGS: [&str; 4] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def"];
 
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
@@ -602,6 +606,11 @@ pub struct Cfg {
     /// dip48 --presend-live-fresh-skip T2PCT:RAPCT (None = off; a lane's 0 = off for it) and its mode (false = log)
     pub fresh_skip: Option<(f64, f64)>,
     pub fresh_live: bool,
+    /// dip49 RIVAL GATE: R0:R2:AGE_H (None = off), live, the slots window; the re-arm fresh-holders definition (true = f1)
+    pub rival_gate: Option<(u32, u32, f64)>,
+    pub rival_live: bool,
+    pub rival_slots: u64,
+    pub fresh_ra_f1: bool,
 }
 
 /// dip43e --presend-live-dump-exit S:C:X -> (S lamports, C lamports, X fraction): S, C in [0, 50] SOL (0 = that trigger off, not both 0),
@@ -649,7 +658,7 @@ impl Cfg {
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D49FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -801,6 +810,10 @@ impl Cfg {
             funder_log: onoff("--presend-live-funder-log", false)?,
             flow_log: onoff(psflow48::FLAG, false)?,
             fresh_skip: match arg("--presend-live-fresh-skip") { None => None, Some(v) => Some(psctl47::fresh_parse(&v).map_err(|e| anyhow::anyhow!("--presend-live-fresh-skip {e}"))?) },
+            rival_gate: match arg(psrival49::FLAG) { None => None, Some(v) => Some(psrival49::spec_parse(&v).map_err(|e| anyhow::anyhow!("{} {e}", psrival49::FLAG))?) },
+            rival_live: match arg(psrival49::FLAG_MODE).as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("{} {x}: log | live", psrival49::FLAG_MODE) },
+            rival_slots: match arg(psrival49::FLAG_SLOTS) { None => 20, Some(v) => v.parse::<u64>().ok().filter(|n| (1..=60).contains(n)).with_context(|| format!("{} {v}: slots 1..60", psrival49::FLAG_SLOTS))? },
+            fresh_ra_f1: match arg(psrival49::FLAG_RADEF).as_deref() { None | Some("f3") => false, Some("f1") => true, Some(x) => bail!("{} {x}: f1 | f3", psrival49::FLAG_RADEF) },
             fresh_live: match arg("--presend-live-fresh-skip-mode").as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("--presend-live-fresh-skip-mode {x}: log | live") },
             funder_rpc: arg("--presend-live-funder-rpc").filter(|u| !u.starts_with("--")),
             funder_rps: match arg("--presend-live-funder-rps") { None => 15, Some(v) => v.parse::<u32>().ok().filter(|n| (1..=40).contains(n))
@@ -808,6 +821,8 @@ impl Cfg {
             limits47: serde_json::json!({"max_sol": arg("--max-sol"), "kill_switch_sol": arg("--max-loss-sol"), "profit_lock": {"min_sol": arg("--profit-lock-min-sol"), "frac": arg("--profit-lock-frac")}}),
         };
         // dip47: the hold clocks it reads are kept only with the annotations on
+        if c.rival_gate.is_none() { if let Some(f) = [psrival49::FLAG_MODE, psrival49::FLAG_SLOTS].iter().find(|f| has(f)) { bail!("{f} needs {} R0:R2:AGE_H", psrival49::FLAG); } }
+        if has(psrival49::FLAG_RADEF) && c.fresh_skip.is_none() { bail!("{} needs --presend-live-fresh-skip T2PCT:RAPCT", psrival49::FLAG_RADEF); }
         if has("--presend-live-fresh-skip-mode") && c.fresh_skip.is_none() { bail!("--presend-live-fresh-skip-mode needs --presend-live-fresh-skip T2PCT:RAPCT"); }
         if c.fresh_skip.is_some() && !c.f3_log { bail!("--presend-live-fresh-skip needs --presend-live-f3-log (the fresh-holders metric it acts on is computed there)"); }
         if has(psrfleet47::FLAG_MODE) && c.rearm_fleet.is_none() { bail!("{} needs {} N:SLOTS", psrfleet47::FLAG_MODE, psrfleet47::FLAG); }
@@ -1141,7 +1156,8 @@ impl Cfg {
         if self.grpsign { j["dip47"] = serde_json::json!({"grpsign_log": true, "t2_pct": psgrp47::T2_PCT}); }
         if let Some((n, k)) = self.rearm_fleet { j["rearm_fleet"] = serde_json::json!({"min": n, "slots": k, "mode": if self.rearm_fleet_live { "live" } else { "log" }}); }
         if self.flow_log { j["flow_log"] = true.into(); }
-        if let Some((a, b)) = self.fresh_skip { j["fresh_skip"] = serde_json::json!({"t2": a, "rearm": b, "mode": if self.fresh_live { "live" } else { "log" }}); }
+        if let Some((a, b)) = self.fresh_skip { j["fresh_skip"] = serde_json::json!({"t2": a, "rearm": b, "mode": if self.fresh_live { "live" } else { "log" }}); if self.fresh_ra_f1 { j["fresh_skip"]["ra_def"] = "f1".into(); } }
+        if let Some((a, b, c)) = self.rival_gate { j["rival_gate"] = serde_json::json!({"r0": a, "r2": b, "age_h": c, "slots": self.rival_slots, "mode": if self.rival_live { "live" } else { "log" }}); }
         if self.funder_log { j["funder_log"] = serde_json::json!({"rps": self.funder_rps, "rpc": if self.funder_rpc.is_some() { "--presend-live-funder-rpc" } else { "fam" }}); }
         j
     }
@@ -1218,7 +1234,9 @@ struct SWin { id: u64, mint: Pk, launch: Launch, st_ns: u64, stop_ns: u64, en_sl
               /// dip46: Some(the blocking filter) = an arm-time PROBE window (every try a probe); None = a real window
               p46: Option<&'static str>,
               /// dip47 re-arm fleet rule: the mint's fleet tries per slot, kept by the main loop (re-arm windows; zero otherwise)
-              rfl: psrfleet47::FlSnap }
+              rfl: psrfleet47::FlSnap,
+              /// dip49 RIVAL GATE: the T2 window's rival payers + dev age, kept by the main loop (off: a re-arm / wide window, the rule off)
+              rg: psrival49::RgSnap }
 
 /// dip28: the deeper limit's holder threshold (% of supply)
 pub const DEEP_OB6: f32 = 6.0;
@@ -1362,6 +1380,8 @@ struct Shared {
     f47: psctl47::Sh47,
     /// dip47 re-arm fleet rule (psrfleet47.rs; off = spec 0)
     rf: psrfleet47::ShRf,
+    /// dip49 RIVAL GATE (psrival49.rs; spec 0 = off)
+    rg: psrival49::ShRg,
 }
 
 impl Shared {
@@ -1386,6 +1406,8 @@ pub struct Att {
     pub x46: psprobe46::X46,
     /// dip47 re-arm fleet rule: this re-arm try's verdict (None: the rule off / not a re-arm window)
     pub rf: Option<psrfleet47::RfV>,
+    /// dip49 the T2 rival gate's verdict at this try (None: off / not a T2 window)
+    pub rg: Option<psrival49::RgV>,
 }
 
 /// what the sender needs
@@ -1434,10 +1456,12 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
     let mut f47v = 0u64;
     // dip47 re-arm fleet rule: the per-window counts for its summary (empty with the rule off)
     let mut srf = psrfleet47::SendRf::default();
+    let mut srg = psrival49::SendRg::default();
     loop {
         if sh.stop.load(Ordering::Relaxed) && sh.wins.lock().unwrap().is_empty() { break; }
         psctl47::sender_sync(&sh.f47, &mut f47v, &mut sc.cfg);
         srf.flush(&out, arbx::fast::mono_ns(), false);
+        srg.flush(&out, arbx::fast::mono_ns(), false);
         let now = arbx::fast::mono_ns();
         let slot = sh.cur_slot();
         let mut due: Vec<SWin> = Vec::new();
@@ -1459,6 +1483,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let mut ab46: u32 = 0;
             // dip47 re-arm fleet rule: this try's verdict (None: off / a T2 or wide window / a probe)
             let mut rfv: Option<psrfleet47::RfV> = None;
+            let mut rgv: Option<psrival49::RgV> = None;
             // dip43 A8 (--presend-live-acct on; nothing otherwise): this window's due try (its refusals are charged by Shared::skip)
             if probe.is_none() { ps43::cur_set(&sh.g43, w.id, slot); }
             // why not now (each counted); dip26: the same gate for every window (send_gate: unit-tested), at the window's own spend
@@ -1553,6 +1578,10 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             // withheld (live) / counted (log); fail open without detector data. Lock-free: the window's copy + 4 relaxed loads
             rfv = psrfleet47::gate(&sh.rf, w.rearm, probe.is_some(), &w.rfl, slot, now);
             if let Some(v) = rfv { srf.note(w.id, w.mint, &v, now); if v.withhold() { sh.skip("rearm_fleet_withheld"); continue 'due; } }
+            // dip49 T2 RIVAL GATE (T2 windows' real tries only): no / few rivals failing on the mint (and a young dev) -> withheld (live) /
+            // counted (log); fail open on a stale fail stream / a blind feed. Lock-free: the window's copy + 5 relaxed loads
+            rgv = psrival49::gate(&sh.rg, &w.rg, probe.is_some(), slot, now);
+            if let Some(v) = rgv { srg.note(w.id, w.mint, &v, now); if v.withhold() { sh.skip("rival_gate_withheld"); continue 'due; } }
             let deadline = (slot + sc.cfg.deadline_slots).min(w.en_slot);
             if deadline < slot { skp(&sh, probe, "window_over"); continue; }
             let (leader, client) = lat::leader_of(slot).unwrap_or_default();
@@ -1606,7 +1635,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             let t1 = arbx::fast::mono_ns();
             let x46 = psprobe46::X46 { probe, ab: ab46, spend: w.spend, fr: w.fr, sv: w.vsol, st: w.vtok, min: min_out };
             let mut a = Att { w: w.id, n: w.n, mint: w.mint, sig, tag, path: r.path.name.clone(), client: client.clone(), slot, deadline, lim, min_out: min_sig, p_sign: w.vsol as f64 / w.vtok.max(1) as f64,
-                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd, fa, bd: bdv, x46, rf: rfv };
+                sign_pos: w.pos, t_send, roles, tip: tip.map_or(0, |t| t.1), wst: "dry", ob6: w.ob6, grd: w.grd, fa, bd: bdv, x46, rf: rfv, rg: rgv };
             // registered BEFORE the write: the main loop knows the signature before its landing can arrive
             // dip43 B2: a tiered try's failed fee for the main loop's fallback (nothing with the tier off)
             if tier.is_some_and(|t| t.on) { ps43_b::tier_fee_note(&sig, psfeeab::fail_fee(cu_limit, cu_price)); }
@@ -1636,6 +1665,7 @@ fn sender(sh: Arc<Shared>, mut sc: SCfg, out: crossbeam_channel::Sender<Out>, at
             if let (Some(v), Some(g)) = (bdv, sc.cfg.bd.as_ref()) { rec["botdepth"] = v.json(g); }
             // dip47: the re-arm fleet rule's verdict (only with the rule on, re-arm windows)
             if let Some(v) = rfv { rec["rearm_fleet"] = v.json(); }
+            if let Some(v) = rgv { rec["rival_gate"] = v.json(); }
             // dip43 B1 / B2: only when re-routed / with the tier on
             if let Some(p0) = path0 { rec["path_orig"] = p0.into(); }
             if let Some(t) = tier { rec["tier"] = t.json(); }
@@ -2570,6 +2600,8 @@ pub struct PsLive {
     fu47: Option<psfunder47::Funder>,
     /// dip48 FOLLOWER-FLOW log (LOG ONLY; None = off)
     fl48: Option<psflow48::Flow48>,
+    /// dip49 RIVAL GATE's main-loop side (None = off)
+    rg49: Option<psrival49::Rg49>,
 }
 
 impl PsLive {
@@ -2611,7 +2643,7 @@ impl PsLive {
         let (atx, arx) = crossbeam_channel::unbounded::<Att>();
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
-            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() });
+            slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(false), skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default(), rg: Default::default() });
         // dip39 BOT DEPTH: the start mode and the list (a bad / missing list: FAIL OPEN, a warning; None with it off)
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let bd = cfg.bd.map(|g| psbd::Bd::open(g, cfg.bd_list.as_deref(), cfg.bd_state.as_deref(), &user));
@@ -2814,7 +2846,7 @@ impl PsLive {
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet,
-            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None };
+            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None, rg49: None };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2836,12 +2868,21 @@ impl PsLive {
         p.fu47 = PsLive::fu47_open(&p.cfg);
         // dip48 FOLLOWER-FLOW log (log only)
         if p.cfg.flow_log { p.fl48 = Some(psflow48::Flow48::new(&p.cfg.tag_wallets)); }
+        // dip49 RIVAL GATE: the feed's fail tap and the dev-age workers (the funder log's RPC setting; never printed)
+        if p.cfg.rival_gate.is_some() {
+            let url = match p.cfg.funder_rpc.as_ref().or(p.cfg.fam_rpc.as_ref()) { Some(u) => config::expand(u), None => PRIMARY_URL.get().cloned() };
+            if url.is_none() { eprintln!("DIP49 RIVAL GATE: no RPC for the dev-age lookups: every dev age is UNKNOWN (only rivals <= R0 can block)"); }
+            p.rg49 = psrival49::Rg49::start(url, p.cfg.funder_rps);
+            eprintln!("DIP49 RIVAL GATE ({}): T2 tries withheld when rivals <= R0 or (rivals <= R2 and dev age < AGE_H h), {:?}, rivals in the last {} slots", if p.cfg.rival_live { "LIVE" } else { "log" }, p.cfg.rival_gate.unwrap(), p.cfg.rival_slots);
+        }
         Ok(p)
     }
 
     fn rec(&mut self, mut v: serde_json::Value) {
         // dip48 (log only): an exit closes its fill's flow (its record first); a realized record gets the compact flow
         if self.fl48.is_some() { self.fl48_on_rec(&mut v); }
+        // dip49: the realized record of a window gets its fill's rival-gate verdict
+        if v["ev"] == "presend_live_realized" { if let Some(j) = self.rg49.as_ref().and_then(|r| v["w"].as_u64().and_then(|w| r.done.get(&w).cloned())) { v["rival_gate"] = j; } }
         // dip47: the filter state's version on the decision records (fill / realized: the window's ARM state in full)
         self.stamp47(&mut v);
         // dip36 skip2 (log-only): its history sees the skips and disarms (nothing without the flag)
@@ -3083,6 +3124,8 @@ impl PsLive {
         // the observatory's (nothing without it)
         if self.rm.is_some() { self.rearm_slot(a.slot, a.t_rx, &launch_of, reactive_open); }
         for c in &x.creates { self.det.create(c.mint, a.slot, c.creator, c.user, x.mayhem); }
+        // dip49 RIVAL GATE: a followed token's creator age, looked up once (nothing with the gate off)
+        if self.rg49.is_some() && !x.mayhem { for c in &x.creates { self.rg49_create(c.mint, c.creator, a.tx.sig, a.t_rx); } }
         // dip42 Q1 (log-only): the creates to its thread (nothing with it off)
         if let Some(q) = self.q1.as_mut() { for c in &x.creates { q.create(c.mint, a.slot, x.mayhem); } }
         // dip38: the launchers (the create tx's fee payer; nothing with the blocklist's launcher match and the logs off)
@@ -3520,7 +3563,7 @@ impl PsLive {
         let fab = self.fab_assign(id);
         let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
             spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
-            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint), p46: None, rfl: Default::default() };
+            grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint), p46: None, rfl: Default::default(), rg: self.rg49_snap(&t.mint, wide.is_none()) };
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.f47_arm(id);
@@ -3698,6 +3741,8 @@ impl PsLive {
         if let Some(j) = self.g47_fill(&att) { rec["grpsign"] = j; }
         // dip47: the filling re-arm try's fleet verdict (only with the rule on)
         if let Some(v) = att.rf { rec["rearm_fleet"] = v.json(); }
+        // dip49: the filling T2 try's rival-gate verdict (only with the gate on)
+        if let Some(v) = att.rg { rec["rival_gate"] = v.json(); self.rg49_fill(att.w, &v); }
         // dip48: the window's fresh-holders verdict at its arm (only with the skip's flag)
         if let Some(j) = self.f47.fresh_w.get(&att.w) { rec["fresh_skip"] = j.clone(); }
         // dip47 FUNDER-CLUSTER log (log only; nothing with it off)
@@ -4367,6 +4412,8 @@ impl PsLive {
         self.ctl47_check(false);
         // dip48: the followed fills whose fill+3 passed (nothing with the log off)
         if self.fl48.is_some() { self.fl48_close(slot_now, None); }
+        // dip49: the feed's slippage fails and the dev-age answers (nothing with the gate off)
+        if self.rg49.is_some() { self.rg49_drain(); }
         self.pause47_tick();
         self.fs_tick();
         // dip38 (log-only): housekeeping and the ledgers' saves (nothing without its flags)
@@ -4726,7 +4773,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fu47.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fl48_status() + &self.status43() + &self.b43_status() + &self.status46();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fu47.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fl48_status() + &self.rg49_status() + &self.status43() + &self.b43_status() + &self.status46();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -5085,7 +5132,7 @@ impl PsLive {
         let sh = Arc::new(Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false), pause_fee: AtomicBool::new(false),
             brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true), skips: Mutex::new(FxHashMap::default()),
-            build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() });
+            build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default(), rg: Default::default() });
         sh.bd.live.store(cfg.bd_live, Ordering::SeqCst);
         let mut det = pl::Detector::new(cfg.whale_pct);
         // dip27: the hold clocks only with the annotations on (as a run)
@@ -5103,7 +5150,7 @@ impl PsLive {
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, d43: Default::default(),
-            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None };
+            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None, rg49: None };
         // dip46: its modes (nothing with its flags off)
         p.p46_start();
         // dip47: the hot keys' start values, the control file's first read, the filter state fv 0
@@ -5111,6 +5158,7 @@ impl PsLive {
         // dip47: the funder log without workers (the tests pump its queue)
         if p.cfg.funder_log { p.fu47 = Some(psfunder47::Funder::idle()); }
         if p.cfg.flow_log { p.fl48 = Some(psflow48::Flow48::new(&p.cfg.tag_wallets)); }
+        if p.cfg.rival_gate.is_some() { p.rg49 = Some(psrival49::Rg49::idle()); }
         (p, atx, orx)
     }
 
@@ -5249,6 +5297,10 @@ mod dip47_tests;
 #[cfg(test)]
 #[path = "dip48_tests.rs"]
 mod dip48_tests;
+// dip49 (11-12): the T2 rival gate + the re-arm f1 definition (psrival49.rs)
+#[cfg(test)]
+#[path = "dip49_tests.rs"]
+mod dip49_tests;
 
 // dip45 (11-11 PKT): the FLEET SIGNAL shadow (ps45_fleet.rs; LOG ONLY, off by default = dip43g)
 #[cfg(test)]
@@ -5278,7 +5330,7 @@ mod tests {
         let mut sg = [0u8; 64]; sg[0] = 0xD1; sg[1] = 0x5F;
         let roles = pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) };
         atx.send(Att { w: 999, n: 1, mint: [7u8; 32], sig: sg, tag: pl::PS_TAG | 1, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 100, deadline: 101,
-            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
+            lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (100, 0, 0), t_send: 0, roles, tip: 0, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None }).unwrap();
         p.drain_atts();
         assert!(!p.idle(), "an unresolved attempt keeps the probe busy");
         assert!(!p.can_end(Duration::ZERO), "never before the stop");
@@ -5345,7 +5397,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default(), rg: Default::default() };
         let (ca, cb, cc) = ([1u8; 32], [2u8; 32], [3u8; 32]);
         {
             let mut g = sh.cr.lock().unwrap();
@@ -5405,7 +5457,7 @@ mod tests {
         let sh = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(0), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(0), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default(), rg: Default::default() };
         let m = 60_000_000_000u64;
         let t0 = 1_000 * m;
         assert_eq!(breaker_note(&sh, &b, -300_000_000, t0), None, "one big loss: not yet");
@@ -5420,7 +5472,7 @@ mod tests {
         let sh2 = Shared { wins: Mutex::new(Vec::new()), stop: AtomicBool::new(false), pause_reactive: AtomicBool::new(false), pause_pos: AtomicBool::new(false),
             pause_fee: AtomicBool::new(false), brk_until: AtomicU64::new(arbx::fast::mono_ns() + 60 * m), brk_losses: Mutex::new(VecDeque::new()), brk_trips: AtomicU64::new(1), bl_send_live: AtomicBool::new(true), bl_withheld: Default::default(), bl_would: Default::default(), bd: Default::default(), cr: Mutex::new(FxHashMap::default()), wh: Mutex::new(Default::default()), hl: Mutex::new(FxHashMap::default()),
             slot: AtomicU64::new(0), seq: AtomicU64::new(0), sent: AtomicU64::new(0), dry: AtomicU64::new(0), exited: AtomicBool::new(true),
-            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default() };
+            skips: Mutex::new(FxHashMap::default()), build_us: Mutex::new(Ring::default()), g43: Default::default(), p46: Default::default(), f47: Default::default(), rf: Default::default(), rg: Default::default() };
         assert!(breaker_paused(&sh2));
         sh2.brk_until.store(arbx::fast::mono_ns().saturating_sub(1), Ordering::SeqCst);
         assert!(!breaker_paused(&sh2));
@@ -5694,7 +5746,7 @@ mod tests {
                     seq += 1;
                     let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&seq.to_be_bytes()); sg[8] = 0xA7; sg[9] = fills_on as u8;
                     let att = Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1, lim: 1.0,
-                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None };
+                        min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None };
                     atx.send(att).unwrap();
                     assert!(p.blocks_reactive(&m).is_some(), "an armed token is not for the reactive bot");
                     if fills_on && seq % 7 == 0 {

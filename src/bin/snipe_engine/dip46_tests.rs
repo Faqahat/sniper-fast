@@ -54,7 +54,7 @@ fn att(w: u64, mint: Pk, sig: [u8; 64], slot: u64, probe: Option<&'static str>) 
     let x46 = psprobe46::X46 { probe, ab: 0, spend: 400_000_000, fr: 0.0125, sv: 38_692_888_509, st: 831_935_821_811_615, min: 9_524_401_719_354 };
     Att { w, n: 1, mint, sig, tag: pl::PS_TAG | (0xD46 << 8) | sig[0] as u64, path: "helius-ps".into(), client: "AgaveBam".into(), slot, deadline: slot + 1, lim: 0.000041,
         min_out: if probe.is_some() { psprobe46::PROBE_MIN_OUT } else { 9_524_401_719_354 }, p_sign: 0.0000466, sign_pos: (slot - 1, 34, 0), t_send: slot * 1_000_000,
-        roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46, rf: None }
+        roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46, rf: None, rg: None }
 }
 /// our failed try landed at (slot, idx) with pump's slippage error at the buy (ix 5, 6042)
 fn fail_land(p: &mut PsLive, sig: [u8; 64], slot: u64, idx: u64, fee: u64) {
@@ -139,7 +139,7 @@ fn dip46_probe_tx_can_never_fill() {
     let l = launch(1);
     let w = SWin { id: psprobe46::PW0 + 1, mint: l.mint, launch: l.clone(), st_ns: 0, stop_ns: u64::MAX, en_slot: 10, vsol: 40_000_000_000, vtok: 800_000_000_000_000, fr: 0.0125,
         pos: (1, 0, 0), pace: pl::Pace::new(0, 1, 400_000_000), n: 0, done: false, spend: 1_000_000_000, rearm: false, ob6: 0.0, grd: Grd::default(), fpg: None, fab: None, blk: None,
-        bd: None, g43: Default::default(), p46: Some("young_age"), rfl: Default::default() };
+        bd: None, g43: Default::default(), p46: Some("young_age"), rfl: Default::default(), rg: Default::default() };
     let lh = GuardEnc { disc: 15, op: 4, acct: true };
     let bh = [9u8; 32];
     for nofloors in [false, true] {

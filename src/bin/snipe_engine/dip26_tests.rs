@@ -166,7 +166,7 @@ pub(super) fn golden_pass(tag: u8, extra: &[&str], ps: arbx::presend::Params, fi
             atx.send(Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | (0xD26 << 32) | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1,
                 lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written",
                 // dip27: the window's other holder, as the sender copies it (0 with the annotations off: the golden records unchanged)
-                ob6: o6, grd: gd, fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
+                ob6: o6, grd: gd, fa: None, bd: None, x46: Default::default(), rf: None, rg: None }).unwrap();
             if fill_every > 0 && seq % fill_every == 0 {
                 let (wv, wt) = p.sh.wins.lock().unwrap().iter().find(|x| x.id == w).map(|x| (x.vsol, x.vtok)).unwrap();
                 let tok = pl::buy_out(wv, wt, spend, 0.0125);
@@ -345,7 +345,7 @@ impl Ctx {
         let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&self.seq.to_be_bytes()); sg[8] = 0xD6; sg[9] = 0xA7;
         self.atx.send(Att { w, n: self.seq as u32, mint, sig: sg, tag: pl::PS_TAG | (0xD26A << 32) | self.seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot, deadline: slot + 1,
             lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (slot, 0, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-            tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
+            tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None }).unwrap();
         self.p.drain_atts();
         sg
     }
@@ -1076,7 +1076,7 @@ fn t2_pass(extra: &[&str]) -> Option<(Vec<String>, serde_json::Value, u64)> {
             seq += 1;
             let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&seq.to_be_bytes()); sg[8] = 0xD6; sg[9] = 0x77;
             atx.send(Att { w, n: 1, mint: m, sig: sg, tag: pl::PS_TAG | (0xD26B << 32) | seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot: *s, deadline: *s + 1,
-                lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
+                lim: 1.0, min_out: 1, p_sign: 1.0, sign_pos: (*s, *idx as u32, 0), t_send: *s * 1_000_000, roles, tip: 200_000, wst: "written", ob6: 0.0, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None }).unwrap();
             if seq % 7 == 0 {
                 let (wv, wt) = p.sh.wins.lock().unwrap().iter().find(|x| x.id == w).map(|x| (x.vsol, x.vtok)).unwrap();
                 let tok = pl::buy_out(wv, wt, spend, 0.0125);
@@ -1305,7 +1305,7 @@ impl Ctx {
         let mut sg = [0u8; 64]; sg[..8].copy_from_slice(&self.seq.to_be_bytes()); sg[8] = 0xD7; sg[9] = 0xA7;
         self.atx.send(Att { w, n: self.seq as u32, mint, sig: sg, tag: pl::PS_TAG | (0xD27A << 32) | self.seq, path: "helius-ps".into(), client: "JitoLabs".into(), slot, deadline: slot + 1,
             lim: p_sign * 0.88, min_out: 1, p_sign, sign_pos: (slot, 0, 0), t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) },
-            tip: 200_000, wst: "written", ob6, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
+            tip: 200_000, wst: "written", ob6, grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None }).unwrap();
         self.p.drain_atts();
         sg
     }
@@ -1653,7 +1653,7 @@ fn dip47_rearm_fleet_rule() {
     let mut sg = [0u8; 64]; sg[0] = 0xF7;
     c.atx.send(Att { w, n: 1, mint: tk.mint, sig: sg, tag: pl::PS_TAG | 0xF7, path: "helius-ps".into(), client: "JitoLabs".into(), slot: 1011, deadline: 1012, lim: 1.0, min_out: 1, p_sign: 1.0,
         sign_pos: (1011, 0, 0), t_send: 1011 * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0,
-        grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: Some(v) }).unwrap();
+        grd: pslive::Grd::default(), fa: None, bd: None, x46: Default::default(), rf: Some(v), rg: None }).unwrap();
     c.p.drain_atts();
     c.fill(&mut tk, sg, 1012, 8, 296_296_296);
     let f = c.ev("presend_live_fill").pop().unwrap();

@@ -451,6 +451,7 @@ impl PsLive {
     pub fn stall43(&mut self, start: bool, now_ns: u64) {
         // dip47 re-arm fleet rule: fail open while the executed feed is blind
         self.sh.rf.blind.store(start, Ordering::Relaxed);
+        self.sh.rg.blind.store(start, Ordering::Relaxed);
         if start {
             self.d43.blind = Some(now_ns);
             if self.d43.stall_live { self.sh.g43.pause_stall.store(true, Ordering::SeqCst); }

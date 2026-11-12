@@ -27,7 +27,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-pub const KEYS: [&str; 23] = ["fresh_skip", "fresh_skip_spec", "rearm_fleet", "rearm_fleet_spec", "rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
+pub const KEYS: [&str; 26] = ["rival_gate", "rival_gate_spec", "fresh_skip_ra_def", "fresh_skip", "fresh_skip_spec", "rearm_fleet", "rearm_fleet_spec", "rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
     "min_age_slots", "exit_ms", "tp", "sl", "grp_t2", "grp_t2_pct", "grp_t2_whale"];
 
 /// the new keys' values (Copy; the start value of each = its flag)
@@ -66,6 +66,11 @@ pub struct Vals {
     /// dip48 fresh-holders skip: (T2 %, re-arm %; 0 = off for the lane), live; None = the flag not given (the keys are ignored)
     pub fresh: Option<(f64, f64)>,
     pub fresh_live: bool,
+    /// dip49 the T2 rival gate (None: the flag not given: the keys ignored), live, its slots; the re-arm fresh definition (true = f1)
+    pub rg: Option<(u32, u32, f64)>,
+    pub rg_live: bool,
+    pub rg_slots: u64,
+    pub fresh_ra_f1: bool,
 }
 
 /// "T2:RA" (each 0 = off, or 5..90 % of supply)
@@ -138,6 +143,10 @@ impl Vals {
             rf_live: c.rearm_fleet_live,
             fresh: c.fresh_skip,
             fresh_live: c.fresh_live,
+            rg: c.rival_gate,
+            rg_live: c.rival_live,
+            rg_slots: c.rival_slots,
+            fresh_ra_f1: c.fresh_ra_f1,
         }
     }
     /// each key's value as the records show it
@@ -165,6 +174,9 @@ impl Vals {
             "pause_now" => (if self.pause_now { "on" } else { "off" }).into(),
             "rearm_fleet" => if self.rf.is_none() { "off".into() } else { (if self.rf_live { "live" } else { "log" }).into() },
             "rearm_fleet_spec" => self.rf.map_or(serde_json::Value::Null, |(n, k)| format!("{n}:{k}").into()),
+            "rival_gate" => if self.rg.is_none() { "off".into() } else { (if self.rg_live { "live" } else { "log" }).into() },
+            "rival_gate_spec" => self.rg.map_or(serde_json::Value::Null, |(a, b, c)| format!("{a}:{b}:{c}").into()),
+            "fresh_skip_ra_def" => if self.fresh.is_none() { serde_json::Value::Null } else { (if self.fresh_ra_f1 { "f1" } else { "f3" }).into() },
             "fresh_skip" => if self.fresh.is_none() { "off".into() } else { (if self.fresh_live { "live" } else { "log" }).into() },
             "fresh_skip_spec" => self.fresh.map_or(serde_json::Value::Null, |(a, b)| format!("{a}:{b}").into()),
             _ => serde_json::Value::Null,
@@ -250,6 +262,18 @@ pub fn key_apply(k: &str, x: &serde_json::Value, start: &Vals, v: &mut Vals) -> 
             v.rearm_cap = f as u32;
         }
         "pause_window" => { (v.pause, v.pause_n) = pause_parse(text(x)?)?; }
+        "rival_gate" => {
+            if start.rg.is_none() { return Err("ignored: needs --presend-live-rival-gate R0:R2:AGE_H at start".into()); }
+            v.rg_live = match text(x)? { "log" => false, "live" => true, s => return Err(format!("'{s}' (log | live)")) };
+        }
+        "rival_gate_spec" => {
+            if start.rg.is_none() { return Err("ignored: needs --presend-live-rival-gate R0:R2:AGE_H at start".into()); }
+            v.rg = Some(psrival49::spec_parse(text(x)?)?);
+        }
+        "fresh_skip_ra_def" => {
+            if start.fresh.is_none() { return Err("ignored: needs --presend-live-fresh-skip T2PCT:RAPCT at start".into()); }
+            v.fresh_ra_f1 = match text(x)? { "f1" => true, "f3" => false, s => return Err(format!("'{s}' (f1 | f3)")) };
+        }
         "fresh_skip" => {
             if start.fresh.is_none() { return Err("ignored: needs --presend-live-fresh-skip T2PCT:RAPCT at start".into()); }
             v.fresh_live = match text(x)? { "log" => false, "live" => true, s => return Err(format!("'{s}' (log | live)")) };
@@ -302,7 +326,8 @@ fn copy_key(k: &str, from: &Vals, to: &mut Vals) {
         "exit_ms" => to.exit_ms = from.exit_ms, "tp" => to.tp = from.tp, "sl" => to.sl = from.sl, "grp_t2" => to.grp_live = from.grp_live,
         "grp_t2_pct" => to.grp_pct = from.grp_pct, "grp_t2_whale" => to.grp_whale_in = from.grp_whale_in,
         "rearm_max_per_mint" => to.rearm_cap = from.rearm_cap, "pause_window" => { to.pause = from.pause; to.pause_n = from.pause_n; } "pause_now" => to.pause_now = from.pause_now,
-        "rearm_fleet" => to.rf_live = from.rf_live, "fresh_skip" => to.fresh_live = from.fresh_live, "fresh_skip_spec" => to.fresh = from.fresh, "rearm_fleet_spec" => to.rf = from.rf, _ => {}
+        "rearm_fleet" => to.rf_live = from.rf_live, "fresh_skip" => to.fresh_live = from.fresh_live,
+        "rival_gate" => to.rg_live = from.rg_live, "rival_gate_spec" => to.rg = from.rg, "fresh_skip_ra_def" => to.fresh_ra_f1 = from.fresh_ra_f1, "fresh_skip_spec" => to.fresh = from.fresh, "rearm_fleet_spec" => to.rf = from.rf, _ => {}
     }
 }
 
@@ -453,6 +478,7 @@ impl PsLive {
         self.f47.start = Some(s);
         self.f47.cur = Some(s);
         self.sh.rf.set(s.rf, s.rf_live);
+        self.sh.rg.set(s.rg, s.rg_slots, s.rg_live);
         if let Some(p) = self.cfg.ledger_ctl.clone() {
             self.line(format!("DIP47 CONTROL KEYS ({p}): {} (absent = the start flag; bad = the old value stays)", KEYS.iter().copied().collect::<Vec<_>>().join(", ")));
             self.f47.ctl = Some((p, None, Instant::now()));
@@ -517,6 +543,7 @@ impl PsLive {
         }
         // the re-arm fleet rule: the sender reads these atomics
         self.sh.rf.set(v.rf, v.rf_live);
+        self.sh.rg.set(v.rg, v.rg_slots, v.rg_live);
         let fr = self.cfg.g43.as_ref().is_some_and(|g| g.floor_rearm);
         let sender = (self.cfg.bd, self.cfg.g43.as_ref().and_then(|g| g.curve_deep), fr);
         let was = old.map(|o| (o.bd, o.curve, o.floors));

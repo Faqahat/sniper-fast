@@ -25,7 +25,7 @@ fn recs(orx: &crossbeam_channel::Receiver<Out>) -> Vec<serde_json::Value> { orx.
 fn att(w: u64, sig: [u8; 64], slot: u64) -> Att {
     Att { w, n: 1, mint: MINT, sig, tag: pl::PS_TAG | 43, path: "helius-ps".into(), client: "JitoLabs".into(), slot, deadline: slot + 1, lim: 1.0, min_out: 7_000, p_sign: 1.0,
         sign_pos: (slot, 0, 0), t_send: 0, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written", ob6: 0.0,
-        grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }
+        grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None }
 }
 
 // ---- GOLDEN -------------------------------------------------------------------------------------------------------------

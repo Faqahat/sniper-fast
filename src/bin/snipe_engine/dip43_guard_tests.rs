@@ -33,7 +33,7 @@ fn launch() -> Launch { snipe_build::launch_from_target(pk("7oeUduY1zhUwQ3YdSP9C
 fn swin(id: u64, h: HSet) -> SWin {
     let l = launch();
     SWin { id, mint: l.mint, launch: l, st_ns: 0, stop_ns: u64::MAX, en_slot: 10, vsol: 40 * S, vtok: 800_000_000_000_000, fr: 0.0125, pos: (1, 0, 0),
-        pace: pl::Pace::new(0, 4, 400_000_000), n: 0, done: false, spend: 400_000_000, rearm: false, ob6: 0.0, grd: Grd::default(), fpg: None, fab: None, blk: None, bd: None, g43: h, p46: None, rfl: Default::default() }
+        pace: pl::Pace::new(0, 4, 400_000_000), n: 0, done: false, spend: 400_000_000, rearm: false, ob6: 0.0, grd: Grd::default(), fpg: None, fab: None, blk: None, bd: None, g43: h, p46: None, rfl: Default::default(), rg: Default::default() }
 }
 const LH: GuardEnc = GuardEnc { disc: 15, op: 4, acct: true };
 const BH: [u8; 32] = [9u8; 32];

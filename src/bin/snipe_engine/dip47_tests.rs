@@ -63,7 +63,7 @@ fn setup(p: &mut PsLive, l: &Launch, slot: u64, tag: u8) {
 fn att(w: u64, mint: Pk, sig: [u8; 64], slot: u64, sign_pos: (u64, u32, i32)) -> Att {
     Att { w, n: 1, mint, sig, tag: pl::PS_TAG | (0xD47 << 8) | sig[0] as u64, path: "helius-ps".into(), client: "AgaveBam".into(), slot, deadline: slot + 1, lim: 1.0,
         min_out: 1, p_sign: 0.0000466, sign_pos, t_send: slot * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000,
-        wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }
+        wst: "written", ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None }
 }
 /// our buy of the window's try lands at (slot, 50)
 fn our_fill(p: &mut PsLive, l: &Launch, sig: [u8; 64], slot: u64) {

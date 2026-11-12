@@ -160,7 +160,7 @@ fn dip48_on_the_probe() {
     let mut sig = [0x47u8; 64]; sig[1] = 50;
     atx.send(Att { w: id, n: 1, mint: l.mint, sig, tag: pl::PS_TAG | 0x48, path: "helius-ps".into(), client: "AgaveBam".into(), slot: n + 1, deadline: n + 2, lim: 1.0, min_out: 1,
         p_sign: 1.0, sign_pos: (n, 34, 0), t_send: n * 1_000_000, roles: pl::Roles { guard: Some(2), ata: Some(3), buy: Some(5), tip: Some(6) }, tip: 200_000, wst: "written",
-        ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None }).unwrap();
+        ob6: 0.0, grd: Grd::default(), fa: None, bd: None, x46: Default::default(), rf: None, rg: None }).unwrap();
     p.drain_atts();
     tr(&mut p, n + 1, 50, 0x47, USER, true, 395_061_728);              // our fill (its sig = the try's)
     tr(&mut p, n + 1, 60, 0x61, [0x22u8; 32], true, 1_000_000_000);    // retail, after us
