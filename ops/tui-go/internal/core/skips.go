@@ -28,6 +28,9 @@ type SkipRow struct {
 	HasCal   bool
 	Cal      float64 // calibrated (expected live) P&L
 	Move     *FMove  // the shadow window's price move
+	// dip46 probes on this skipped window (real on-chain tries with an impossible min-out): how many landed and how many of them
+	// would have filled at our limit. ProbeN > 0 && ProbeWould == 0: the trade would not have happened (nothing saved or lost).
+	ProbeN, ProbeWould int
 }
 
 type skipRec struct {
@@ -249,7 +252,7 @@ func SkipWhyName(why string) string {
 var withheldKeys = map[string]bool{"rgate_live": true, "botdepth_live": true, "fpnb_live": true, "rfleet_live": true, "skip2_live": true}
 
 // Rows: every skip, newest first. F supplies the shadow paper, R the withheld windows and the calibration.
-func (S *SkipAcc) Rows(F *FiltAcc, R *FiltReport) []SkipRow {
+func (S *SkipAcc) Rows(F *FiltAcc, R *FiltReport, P *V5Acc) []SkipRow {
 	out := make([]SkipRow, 0, len(S.recs)+16)
 	var cal *Calib
 	size := 0.0
@@ -286,13 +289,53 @@ func (S *SkipAcc) Rows(F *FiltAcc, R *FiltReport) []SkipRow {
 			out = append(out, row)
 		}
 	}
+	if P != nil && len(P.lands) > 0 { // the probes of each skipped window: same mint, the skip's filter, landed within the window's time
+		by := map[string][]*v5Land{}
+		for _, l := range P.lands {
+			if l.res != "unseen" {
+				by[l.mint] = append(by[l.mint], l)
+			}
+		}
+		for i := range out {
+			r := &out[i]
+			pf := probeFilter(r.Why)
+			for _, l := range by[r.Mint] {
+				if l.t < r.T-int64(2e9) || l.t > r.T+int64(20e9) || !(l.filter == pf || strings.HasPrefix(l.filter, pf)) {
+					continue
+				}
+				r.ProbeN++
+				if l.wouldFill {
+					r.ProbeWould++
+				}
+			}
+		}
+	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].T > out[j].T })
 	return out
+}
+
+// probeFilter: the probe records' filter name of a skip's why (arm-time skips: the why itself, re-arm prefix off; the per-try
+// gates' windows: "<gate>_withheld").
+func probeFilter(why string) string {
+	switch why {
+	case "rgate_live":
+		return "rival_gate_withheld"
+	case "botdepth_live":
+		return "botdepth_withheld"
+	case "fpnb_live":
+		return "fpnb_withheld"
+	case "rfleet_live":
+		return "rearm_fleet_withheld"
+	case "skip2_live":
+		return "skip2_withheld"
+	}
+	return strings.TrimPrefix(why, "rearm_")
 }
 
 // SkipsTotals: for a set of rows, how many had a paper value, its wins / losses and the paper / calibrated sums.
 type SkipsTotals struct {
 	N, Scored, WinN, LoseN int
+	NoFill                 int // probes landed and none would have filled (and no shadow paper)
 	Paper, Cal             float64
 	CalN                   int
 }
@@ -309,6 +352,9 @@ func SumSkips(rows []SkipRow) SkipsTotals {
 			} else {
 				t.LoseN++
 			}
+		}
+		if !r.HasPaper && r.ProbeN > 0 && r.ProbeWould == 0 {
+			t.NoFill++
 		}
 		if r.HasCal {
 			t.CalN++

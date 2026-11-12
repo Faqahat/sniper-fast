@@ -782,3 +782,9 @@ images of a few for a phone: DejaVu Sans Mono on a dark background, roughly what
 - Code: `internal/core/skips.go` (SkipAcc: every presend_live_skip; Rows joins the Filters accumulator's shadow paper and the
   Filters report's withheld windows), `internal/ui/trades.go` (skipRows, skipCells, skipLines, mintQuery). `--screen WxH --page
   skips | skipsall | find:%MINT%[,skips]` renders it headless. Snapshot / JSON unchanged (r82, r89 identical to v5).
+- **Probes on skip rows (11-12, owner: "why don't we get the P&L of the missing ones, didn't we set up probes?")**: each skip row is
+  joined to the dip46 probes of its window (same mint, the skip's filter, landed within the window). P&L column: the shadow paper /
+  calibrated value when the shadow filled; `no fill` when real probes landed and none would have filled (the trade would not have
+  happened: nothing saved or lost); `fill?` when a probe would have filled but there is no priced shadow; `–` only when there is
+  neither (re-arm windows, legacy-create tokens, more windows than the probe rate covers). The SKIP panel shows "probes: N landed,
+  K would have filled"; the header counts `no fill N`.

@@ -985,7 +985,7 @@ func BuildView(ctx *Ctx, scope int) *View {
 	v.Alerts = makeAlerts(v, ctx, M)
 	v.Filt = M.Filt.Report(ctx.GcrSeedPath(), ctx.CalibTable()) // the whole file (every session), cached per records version
 	v.Paper = M.Filt.Paper()
-	v.Skips = M.Skips.Rows(M.Filt, v.Filt)
+	v.Skips = M.Skips.Rows(M.Filt, v.Filt, M.V5)
 	v.SkipTrades = make([]*Trade, len(v.Skips))
 	for i := range v.Skips {
 		r := &v.Skips[i]

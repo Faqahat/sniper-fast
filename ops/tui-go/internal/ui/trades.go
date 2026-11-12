@@ -599,6 +599,9 @@ func (m *Model) scrTrades(w, bh int) string {
 		st := core.SumSkips(skr)
 		lbl := map[int]string{1: "filter skips", 2: "all skips"}[m.skipsMode]
 		left += t.Warn.Render("  + "+lbl) + t.Lbl.Render(fmt.Sprintf(" %d", nsk))
+		if st.NoFill > 0 {
+			left += t.Lbl.Render(fmt.Sprintf("  no fill %d", st.NoFill))
+		}
 		if st.Scored > 0 {
 			left += t.Lbl.Render(fmt.Sprintf("  paper %dW/%dL ", st.WinN, st.LoseN)) + t.Money(int64(st.Paper*core.LAM), true, false).Render(core.FS(st.Paper, 3))
 			if st.CalN > 0 {
@@ -750,8 +753,13 @@ func (m *Model) skipCells(r *core.SkipRow, cols []tcol) ([]string, []lipgloss.St
 			s, st = core.Short(r.Mint, c.w), t.Lbl
 		case "P&L SOL":
 			s = core.G.Dash
-			if has {
+			switch {
+			case has:
 				s, st = core.Sol(lam, true, 4, true)+mark, ps
+			case r.ProbeWould > 0: // real probes say a try would have filled, but there is no priced shadow window
+				s, st = "fill?", t.Warn
+			case r.ProbeN > 0: // real probes landed and none would have filled: the trade would not have happened
+				s = "no fill"
 			}
 		case "USD":
 			if has && v.Price != 0 {
@@ -806,6 +814,13 @@ func (m *Model) skipLines(r *core.SkipRow, w int) []string {
 		val += ": re-arm windows have none)"
 	} else {
 		val += " filled)"
+	}
+	if r.ProbeN > 0 {
+		pv := fmt.Sprintf("probes: %d landed, %d would have filled", r.ProbeN, r.ProbeWould)
+		if r.ProbeWould == 0 {
+			pv += " = no trade would have happened (nothing saved or lost)"
+		}
+		val += " · " + pv
 	}
 	if r.HasPaper {
 		val = "paper " + core.FS(r.Paper, 4) + "◎"
