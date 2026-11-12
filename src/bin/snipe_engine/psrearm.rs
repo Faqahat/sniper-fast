@@ -437,6 +437,8 @@ impl PsLive {
             spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint), bd: self.bd_snap(&mint), g43: self.g43_set(&mint), p46: None, rfl: self.rf47_snap(&mint), rg: Default::default() });
         self.armed.insert(mint, id);
         self.f47_arm(id);
+        // dip50 GRX (log only): the dump's % of supply for the fill record (nothing with it off)
+        if let Some(g) = self.grx.as_mut() { g.note_trig(id, dump.tr.tok as f64 / pl::SUPPLY * 100.0); }
         let _ = self.fu47_event(id, &mint, "arm", dump.tr.s);
         // dip47 (log only): the re-arm window's group at its arm, on the guard set's slot (nothing with the flag off)
         if self.cfg.grpsign { self.g47_snap(id, &mint, pos, dump.tr.s); }
@@ -636,4 +638,10 @@ impl PsLive {
     pub fn rearm_split(&self) -> Option<serde_json::Value> { self.rm.as_ref().map(|r| r.rz.json()) }
     /// the split the async realized lookups add to (None without re-arm)
     pub(super) fn rz(&self) -> Option<Arc<RzSplit>> { self.rm.as_ref().map(|r| r.rz.clone()) }
+}
+
+#[cfg(test)]
+impl Rearm {
+    /// tests: window `id` counts as a re-arm window
+    pub(super) fn test_mark(&mut self, id: u64) { self.note_id(id); }
 }

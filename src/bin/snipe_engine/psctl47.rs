@@ -19,6 +19,7 @@
 //      tp, sl          0.02..0.9        take-profit / stop-loss; positions opened after the change
 //      grp_t2          log | live       dip47 GRPSIGN as an ARM-TIME T2 skip (never re-arm / wide); needs --presend-live-grpsign-log on
 //      grp_t2_pct      1..20 (3.0)      its threshold (% of supply)
+//      grx / grx_pct / grx_exit_slots   dip50 GRX (psgrx50.rs): log | live, 1..20 (2.245), 1..5 (1); need --presend-live-grx on
 //      grp_t2_whale    out | in (out)   the trigger whale counted in the group (r82: the whale is a member in 48 of 105 T2 fills; "in" skips ~55% of T2)
 // B) FILTER STATE: one versioned object of every hot key (old and new), the decisive start-only settings; `fv` bumps on every change,
 //    `fh` = its hash. presend_live_filter_state {fv, fh, state, changed: {key: [old, new]}, src} at start (fv 0) and on every change, with a
@@ -29,6 +30,11 @@ use std::collections::BTreeMap;
 
 pub const KEYS: [&str; 26] = ["rival_gate", "rival_gate_spec", "fresh_skip_ra_def", "fresh_skip", "fresh_skip_spec", "rearm_fleet", "rearm_fleet_spec", "rearm_max_per_mint", "pause_window", "pause_now", "floors", "wh_kinds", "size_t2", "size_rearm", "mint_ledger_sol", "wh_loss", "holder_loss", "botdepth", "curve_deep_pct",
     "min_age_slots", "exit_ms", "tp", "sl", "grp_t2", "grp_t2_pct", "grp_t2_whale"];
+
+/// dip50 GRX's keys (psgrx50.rs): read, applied and in the filter state only with --presend-live-grx on (off: dip49c's state / hash)
+pub const KEYS50: [&str; 3] = ["grx", "grx_pct", "grx_exit_slots"];
+/// every key the control file may carry
+pub fn all_keys() -> impl Iterator<Item = &'static str> { KEYS.iter().chain(KEYS50.iter()).copied() }
 
 /// the new keys' values (Copy; the start value of each = its flag)
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -71,6 +77,11 @@ pub struct Vals {
     pub rg_live: bool,
     pub rg_slots: u64,
     pub fresh_ra_f1: bool,
+    /// dip50 GRX: the flag on (off: its keys are ignored), live, the threshold (% of supply), the exit at fill slot + N
+    pub grx_on: bool,
+    pub grx_live: bool,
+    pub grx_pct: f64,
+    pub grx_slots: u64,
 }
 
 /// "T2:RA" (each 0 = off, or 5..90 % of supply)
@@ -147,6 +158,10 @@ impl Vals {
             rg_live: c.rival_live,
             rg_slots: c.rival_slots,
             fresh_ra_f1: c.fresh_ra_f1,
+            grx_on: c.grx,
+            grx_live: c.grx_live,
+            grx_pct: c.grx_pct,
+            grx_slots: c.grx_slots,
         }
     }
     /// each key's value as the records show it
@@ -179,6 +194,9 @@ impl Vals {
             "fresh_skip_ra_def" => if self.fresh.is_none() { serde_json::Value::Null } else { (if self.fresh_ra_f1 { "f1" } else { "f3" }).into() },
             "fresh_skip" => if self.fresh.is_none() { "off".into() } else { (if self.fresh_live { "live" } else { "log" }).into() },
             "fresh_skip_spec" => self.fresh.map_or(serde_json::Value::Null, |(a, b)| format!("{a}:{b}").into()),
+            "grx" => if !self.grx_on { "off".into() } else { (if self.grx_live { "live" } else { "log" }).into() },
+            "grx_pct" => if self.grx_on { json!(self.grx_pct) } else { serde_json::Value::Null },
+            "grx_exit_slots" => if self.grx_on { json!(self.grx_slots) } else { serde_json::Value::Null },
             _ => serde_json::Value::Null,
         }
     }
@@ -192,8 +210,8 @@ pub fn ctl47_parse(b: &[u8]) -> std::result::Result<Raw, String> {
     let v: serde_json::Value = serde_json::from_slice(b).map_err(|e| format!("bad JSON: {e}"))?;
     let o = v.as_object().ok_or("not an object")?;
     let mut r = Raw::new();
-    for k in KEYS.iter() {
-        if let Some(x) = o.get(*k).filter(|x| !x.is_null()) { r.insert(k, Ok(x.clone())); }
+    for k in all_keys() {
+        if let Some(x) = o.get(k).filter(|x| !x.is_null()) { r.insert(k, Ok(x.clone())); }
     }
     Ok(r)
 }
@@ -292,6 +310,18 @@ pub fn key_apply(k: &str, x: &serde_json::Value, start: &Vals, v: &mut Vals) -> 
         }
         "pause_now" => v.pause_now = match text(x)? { "on" => true, "off" => false, s => return Err(format!("'{s}' (on | off)")) },
         "grp_t2_whale" => v.grp_whale_in = match text(x)? { "out" => false, "in" => true, s => return Err(format!("'{s}' (out | in)")) },
+        "grx" | "grx_pct" | "grx_exit_slots" => {
+            if !start.grx_on { return Err(format!("ignored: needs {} on at start", psgrx50::FLAG)); }
+            match k {
+                "grx" => v.grx_live = match text(x)? { "log" => false, "live" => true, s => return Err(format!("'{s}' (log | live)")) },
+                "grx_pct" => v.grx_pct = num(x, 1.0, 20.0, "% of supply 1..20")?,
+                _ => {
+                    let f = num(x, 1.0, 5.0, "slots 1..5")?;
+                    if f.fract() != 0.0 { return Err(format!("{f}: a whole number of slots 1..5")); }
+                    v.grx_slots = f as u64;
+                }
+            }
+        }
         _ => return Err("unknown key".into()),
     }
     Ok(())
@@ -301,7 +331,7 @@ pub fn key_apply(k: &str, x: &serde_json::Value, start: &Vals, v: &mut Vals) -> 
 pub fn resolve(raw: &Raw, start: &Vals, cur: &Vals) -> (Vals, Vec<(&'static str, String)>) {
     let mut v = *start;
     let mut errs = Vec::new();
-    for k in KEYS.iter() {
+    for k in all_keys() {
         let Some(x) = raw.get(k) else { continue };
         let x = x.as_ref().expect("parse gives Ok");
         let mut t = v;
@@ -312,7 +342,7 @@ pub fn resolve(raw: &Raw, start: &Vals, cur: &Vals) -> (Vals, Vec<(&'static str,
                 let mut keep = v;
                 copy_key(k, cur, &mut keep);
                 v = keep;
-                errs.push((*k, e));
+                errs.push((k, e));
             }
         }
     }
@@ -327,7 +357,8 @@ fn copy_key(k: &str, from: &Vals, to: &mut Vals) {
         "grp_t2_pct" => to.grp_pct = from.grp_pct, "grp_t2_whale" => to.grp_whale_in = from.grp_whale_in,
         "rearm_max_per_mint" => to.rearm_cap = from.rearm_cap, "pause_window" => { to.pause = from.pause; to.pause_n = from.pause_n; } "pause_now" => to.pause_now = from.pause_now,
         "rearm_fleet" => to.rf_live = from.rf_live, "fresh_skip" => to.fresh_live = from.fresh_live,
-        "rival_gate" => to.rg_live = from.rg_live, "rival_gate_spec" => to.rg = from.rg, "fresh_skip_ra_def" => to.fresh_ra_f1 = from.fresh_ra_f1, "fresh_skip_spec" => to.fresh = from.fresh, "rearm_fleet_spec" => to.rf = from.rf, _ => {}
+        "rival_gate" => to.rg_live = from.rg_live, "rival_gate_spec" => to.rg = from.rg, "fresh_skip_ra_def" => to.fresh_ra_f1 = from.fresh_ra_f1, "fresh_skip_spec" => to.fresh = from.fresh, "rearm_fleet_spec" => to.rf = from.rf,
+        "grx" => to.grx_live = from.grx_live, "grx_pct" => to.grx_pct = from.grx_pct, "grx_exit_slots" => to.grx_slots = from.grx_slots, _ => {}
     }
 }
 
@@ -481,6 +512,7 @@ impl PsLive {
         self.sh.rg.set(s.rg, s.rg_slots, s.rg_live);
         if let Some(p) = self.cfg.ledger_ctl.clone() {
             self.line(format!("DIP47 CONTROL KEYS ({p}): {} (absent = the start flag; bad = the old value stays)", KEYS.iter().copied().collect::<Vec<_>>().join(", ")));
+            if self.cfg.grx { self.line(format!("DIP50 CONTROL KEYS ({p}): {} (absent = the start flag; bad = the old value stays)", KEYS50.join(", "))); }
             self.f47.ctl = Some((p, None, Instant::now()));
             self.ctl47_check(true);
         }
@@ -514,7 +546,7 @@ impl PsLive {
             self.rec(serde_json::json!({"ev": "presend_live_ledger_mode", "ok": false, "key": k, "err": e, "value": raw.get(k).and_then(|x| x.as_ref().ok()).cloned(), "kept": cur.get(k), "path": path, "dip47": true, "t": arbx::feeds::clock::now_ns()}));
             self.line(format!("  PRESEND LIVE LEDGER MODES dip47: \"{k}\" REFUSED ({e}): stays {}", cur.get(k)));
         }
-        let ch: Vec<(&str, serde_json::Value, serde_json::Value)> = KEYS.iter().filter_map(|k| { let (o, n) = (cur.get(k), new.get(k)); (o != n).then_some((*k, o, n)) }).collect();
+        let ch: Vec<(&str, serde_json::Value, serde_json::Value)> = all_keys().filter_map(|k| { let (o, n) = (cur.get(k), new.get(k)); (o != n).then_some((k, o, n)) }).collect();
         if ch.is_empty() { return; }
         self.f47_set(new);
         self.f47.ctl_changes += 1;
@@ -617,6 +649,8 @@ impl PsLive {
         // dip47 new keys
         let v = self.v47();
         for k in KEYS.iter() { put(k, v.get(k)); }
+        // dip50 GRX: only when on (off: dip49c's state, its hash unchanged)
+        if self.cfg.grx { for k in KEYS50.iter() { put(k, v.get(k)); } }
         put("grpsign_log", self.cfg.grpsign.into());
         put("fleet_log", self.cfg.fleet.is_some().into());
         put("funder_log", self.cfg.funder_log.into());

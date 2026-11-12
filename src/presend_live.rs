@@ -314,6 +314,15 @@ impl Detector {
         }).collect()
     }
 
+    /// dip50 (log only): one wallet's clock on a token at `slot` (holder_clocks' numbers; None: the token is not followed / no entry)
+    pub fn holder_clock(&self, mint: &Pk, k: &Pk, slot: u64) -> Option<HolderClock> {
+        let w = self.toks.get(mint).filter(|t| !t.out)?.wal.get(k)?;
+        let age = if w.fb > 0 { slot.saturating_sub(w.fb) } else { 0 };
+        let (n, p25, p50, p75, h3) = self.holds.get(k).map_or((0, 0, 0, 0, None), |h| h.stats(age));
+        let (risk, hz3) = self.holds.get(k).map_or((0, 0.0), |h| h.hz(age, 3));
+        Some(HolderClock { w: *k, bal: w.bal, age, n, p25, p50, p75, h3, risk, hz3 })
+    }
+
     /// dip47 (log-only GRPSIGN): the dip30 GROUP RISK metric on the state now, without `holder_clocks`' allocations: the same holders
     /// (>= `min` raw tokens, `not` out, largest first then by key, at most `top`), the same per-holder test (>= 5 holds at risk, 3-slot
     /// hazard >= 0.3 at its hold age at `slot`), their holdings summed in the same order (% of supply; bit-identical to the landing

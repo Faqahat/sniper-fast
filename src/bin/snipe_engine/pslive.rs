@@ -287,6 +287,12 @@ pub mod psrival49;
 const D49FLAGS: [&str; 6] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def",
     "--presend-live-devage-rpc", "--presend-live-devage-fallback"];
 
+// dip50: GRX = the rival-ahead early exit (T2 lane; log / live; off by default = dip49c)
+#[path = "psgrx50.rs"]
+pub mod psgrx50;
+// (the literal names: the start-up flag check reads this file)
+const D50FLAGS: [&str; 4] = ["--presend-live-grx", "--presend-live-grx-mode", "--presend-live-grx-pct", "--presend-live-grx-exit-slots"];
+
 /// dip26 RE-ARM's parameters (off by default)
 #[derive(Clone, Debug, PartialEq)]
 pub struct RearmCfg {
@@ -612,6 +618,11 @@ pub struct Cfg {
     pub rival_live: bool,
     pub rival_slots: u64,
     pub fresh_ra_f1: bool,
+    /// dip50 GRX (psgrx50.rs): on (computed + logged), live at start, the threshold (% of supply), the exit at fill slot + N
+    pub grx: bool,
+    pub grx_live: bool,
+    pub grx_pct: f64,
+    pub grx_slots: u64,
     /// dip49b --presend-live-devage-rpc URL (None: the funder log's setting); never printed
     pub devage_rpc: Option<String>,
     /// dip49c --presend-live-devage-fallback payer|none (payer): an EMPTY creator history falls back to the create's fee payer (both empty:
@@ -664,7 +675,7 @@ impl Cfg {
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D49FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D49FLAGS.iter()).chain(D50FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -820,6 +831,10 @@ impl Cfg {
             rival_live: match arg(psrival49::FLAG_MODE).as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("{} {x}: log | live", psrival49::FLAG_MODE) },
             rival_slots: match arg(psrival49::FLAG_SLOTS) { None => 20, Some(v) => v.parse::<u64>().ok().filter(|n| (1..=60).contains(n)).with_context(|| format!("{} {v}: slots 1..60", psrival49::FLAG_SLOTS))? },
             devage_rpc: arg(psrival49::FLAG_RPC).filter(|u| !u.starts_with("--")),
+            grx: onoff(psgrx50::FLAG, false)?,
+            grx_live: match arg(psgrx50::FLAG_MODE).as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("{} {x}: log | live", psgrx50::FLAG_MODE) },
+            grx_pct: match arg(psgrx50::FLAG_PCT) { None => psgrx50::THR, Some(v) => psgrx50::pct_parse(&v).map_err(|e| anyhow::anyhow!("{} {e}", psgrx50::FLAG_PCT))? },
+            grx_slots: match arg(psgrx50::FLAG_SLOTS) { None => psgrx50::EXIT_SLOTS, Some(v) => psgrx50::slots_parse(&v).map_err(|e| anyhow::anyhow!("{} {e}", psgrx50::FLAG_SLOTS))? },
             devage_payer: match arg("--presend-live-devage-fallback").as_deref() { None | Some("payer") => true, Some("none") => false, Some(x) => bail!("--presend-live-devage-fallback {x}: payer | none") },
             fresh_ra_f1: match arg(psrival49::FLAG_RADEF).as_deref() { None | Some("f3") => false, Some("f1") => true, Some(x) => bail!("{} {x}: f1 | f3", psrival49::FLAG_RADEF) },
             fresh_live: match arg("--presend-live-fresh-skip-mode").as_deref() { None | Some("log") => false, Some("live") => true, Some(x) => bail!("--presend-live-fresh-skip-mode {x}: log | live") },
@@ -831,6 +846,8 @@ impl Cfg {
         // dip47: the hold clocks it reads are kept only with the annotations on
         if has(psrival49::FLAG_RPC) && c.devage_rpc.is_none() { bail!("{} needs a URL (${{VAR}} expanded)", psrival49::FLAG_RPC); }
         if c.rival_gate.is_none() { if let Some(f) = [psrival49::FLAG_MODE, psrival49::FLAG_SLOTS, psrival49::FLAG_RPC, "--presend-live-devage-fallback"].iter().find(|f| has(f)) { bail!("{f} needs {} R0:R2:AGE_H", psrival49::FLAG); } }
+        if !c.grx { if let Some(f) = [psgrx50::FLAG_MODE, psgrx50::FLAG_PCT, psgrx50::FLAG_SLOTS].iter().find(|f| has(f)) { bail!("{f} needs {} on", psgrx50::FLAG); } }
+        if c.grx && !c.ann { bail!("{} on needs --presend-live-ann on (the hold clocks are kept only with it)", psgrx50::FLAG); }
         if has(psrival49::FLAG_RADEF) && c.fresh_skip.is_none() { bail!("{} needs --presend-live-fresh-skip T2PCT:RAPCT", psrival49::FLAG_RADEF); }
         if has("--presend-live-fresh-skip-mode") && c.fresh_skip.is_none() { bail!("--presend-live-fresh-skip-mode needs --presend-live-fresh-skip T2PCT:RAPCT"); }
         if c.fresh_skip.is_some() && !c.f3_log { bail!("--presend-live-fresh-skip needs --presend-live-f3-log (the fresh-holders metric it acts on is computed there)"); }
@@ -1167,6 +1184,8 @@ impl Cfg {
         if self.flow_log { j["flow_log"] = true.into(); }
         if let Some((a, b)) = self.fresh_skip { j["fresh_skip"] = serde_json::json!({"t2": a, "rearm": b, "mode": if self.fresh_live { "live" } else { "log" }}); if self.fresh_ra_f1 { j["fresh_skip"]["ra_def"] = "f1".into(); } }
         if let Some((a, b, c)) = self.rival_gate { j["rival_gate"] = serde_json::json!({"r0": a, "r2": b, "age_h": c, "slots": self.rival_slots, "mode": if self.rival_live { "live" } else { "log" }}); }
+        // dip50: only when on (off: dip49c's record)
+        if self.grx { j["grx"] = serde_json::json!({"grx": if self.grx_live { "live" } else { "log" }, "grx_pct": self.grx_pct, "grx_exit_slots": self.grx_slots, "lane": "t2", "rule": "G2 entrant risk"}); }
         if self.funder_log { j["funder_log"] = serde_json::json!({"rps": self.funder_rps, "rpc": if self.funder_rpc.is_some() { "--presend-live-funder-rpc" } else { "fam" }}); }
         j
     }
@@ -2611,6 +2630,8 @@ pub struct PsLive {
     fl48: Option<psflow48::Flow48>,
     /// dip49 RIVAL GATE's main-loop side (None = off)
     rg49: Option<psrival49::Rg49>,
+    /// dip50 GRX's main-loop state (None = off)
+    grx: Option<psgrx50::Grx>,
 }
 
 impl PsLive {
@@ -2855,7 +2876,7 @@ impl PsLive {
             q: None, pid: 0, atas: FxHashMap::default(), quiet: FxHashMap::default(), ends: FxHashMap::default(), retry: Vec::new(), reading: FxHashMap::default(),
             tasks: Arc::new(AtomicU64::new(0)), qt, v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm, l34, l35, fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet,
-            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None, rg49: None };
+            d43: Default::default(), b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None, rg49: None, grx: None };
         if let Some(r) = qrec { p.rec(r); }
         // dip37: the ledgers' control file decides the start modes (nothing without it)
         p.ledger_ctl_open();
@@ -2877,6 +2898,12 @@ impl PsLive {
         p.fu47 = PsLive::fu47_open(&p.cfg);
         // dip48 FOLLOWER-FLOW log (log only)
         if p.cfg.flow_log { p.fl48 = Some(psflow48::Flow48::new(&p.cfg.tag_wallets)); }
+        // dip50 GRX (None with the flag off)
+        if p.cfg.grx {
+            p.grx = Some(psgrx50::Grx::default());
+            eprintln!("DIP50 GRX ({}): rival-ahead early exit, T2 fills only: at our landing the holders >= 2% (top 12, ours and the trigger whale out) with risk >= 5 and hz3 >= 0.3 that bought at / after the trigger slot, summed >= {}% of supply -> {} at fill slot + {} (reason \"grx\"; never later than the regular exit; TP / SL as usual) | re-arm fills: logged only | hot keys grx, grx_pct, grx_exit_slots",
+                if p.cfg.grx_live { "LIVE" } else { "log" }, p.cfg.grx_pct, if p.cfg.grx_live { "EXIT" } else { "would exit (log: nothing changes)" }, p.cfg.grx_slots);
+        }
         // dip49 RIVAL GATE: the feed's fail tap and the dev-age workers (the funder log's RPC setting; never printed)
         if p.cfg.rival_gate.is_some() {
             let url = match p.cfg.devage_rpc.as_ref().or(p.cfg.funder_rpc.as_ref()).or(p.cfg.fam_rpc.as_ref()) { Some(u) => config::expand(u), None => PRIMARY_URL.get().cloned() };
@@ -2893,6 +2920,8 @@ impl PsLive {
     fn rec(&mut self, mut v: serde_json::Value) {
         // dip48 (log only): an exit closes its fill's flow (its record first); a realized record gets the compact flow
         if self.fl48.is_some() { self.fl48_on_rec(&mut v); }
+        // dip50 GRX: a "grx" exit counted; a realized record gets its fill's verdict (nothing with it off)
+        if self.grx.is_some() { self.grx50_on_rec(&mut v); }
         // dip49: the realized record of a window gets its fill's rival-gate verdict
         if v["ev"] == "presend_live_realized" { if let Some(j) = self.rg49.as_ref().and_then(|r| v["w"].as_u64().and_then(|w| r.done.get(&w).cloned())) { v["rival_gate"] = j; } }
         // dip47: the filter state's version on the decision records (fill / realized: the window's ARM state in full)
@@ -3228,6 +3257,8 @@ impl PsLive {
             if self.fu47.is_some() { self.fu47_trade(&t); }
             // dip48 FOLLOWER-FLOW log (log only; one map lookup per trade; nothing with it off)
             if self.fl48.is_some() { self.fl48_trade(&t, &a.tx); }
+            // dip50 GRX: the evaluated fills' price paths (one map lookup per trade; nothing with it off)
+            if self.grx.is_some() { self.grx50_trade(&t); }
             // dip37c: the per-send blocklist's cached listed holder (a listed wallet's trade only; nothing without the flag)
             if self.cfg.blocklist_send { self.bl_send_refresh(&e.mint, Some(&e.user)); }
             // dip38 (log-only): the launcher's trades, the shape's slot deltas, a new >= 3% buyer of an armed token queued (nothing with it off)
@@ -3586,6 +3617,8 @@ impl PsLive {
         self.sh.wins.lock().unwrap().push(sw);
         self.armed.insert(t.mint, id);
         self.f47_arm(id);
+        // dip50 GRX (log only): the trigger's % of supply for the fill record (nothing with it off)
+        if let Some(g) = self.grx.as_mut() { g.note_trig(id, pct); }
         // dip47 FUNDER-CLUSTER log (log only; nothing with it off)
         let _ = self.fu47_event(id, &t.mint, "arm", t.s);
         // dip47 (log only): the window's group at its arm (the first tries' state until the next trade; nothing with the flag off)
@@ -3764,6 +3797,10 @@ impl PsLive {
         if let Some(v) = att.rg { rec["rival_gate"] = v.json(); self.rg49_fill(att.w, &v); }
         // dip48: the window's fresh-holders verdict at its arm (only with the skip's flag)
         if let Some(j) = self.f47.fresh_w.get(&att.w) { rec["fresh_skip"] = j.clone(); }
+        // dip50 GRX (nothing with it off): the entrant risk at our landing (the annotation's holder state); live + flagged + this fill
+        // opens the position -> its exit at fill slot + N (armed below, once the position has its pid)
+        let (grx_j, grx_n) = if self.grx.is_some() { let opens = !self.pos.contains_key(&t.mint); self.grx50_fill(&att, t, opens) } else { (None, None) };
+        if let Some(j) = grx_j { rec["grx"] = j; }
         // dip47 FUNDER-CLUSTER log (log only; nothing with it off)
         if let Some(j) = self.fu47_event(att.w, &t.mint, "fill", t.s) { rec["funder"] = j; }
         // dip48 FOLLOWER-FLOW log (log only; nothing with it off)
@@ -3809,6 +3846,7 @@ impl PsLive {
                     att: Some(att.clone()), exit: None, sell_lands: Vec::new(), sells: Vec::new(), round: 0, selling: false, opened: Instant::now(), acct, merged: 0, late: 0, via: "feed",
                     rearm });
                 self.f47_pos_open(self.pid);
+                if let Some(n) = grx_n { self.grx50_arm(self.pid, n); }
                 self.sh.pause_pos.store(true, Ordering::Relaxed);
                 self.tapes.entry(t.mint).or_insert_with(|| (VecDeque::new(), 0));
             }
@@ -4354,7 +4392,9 @@ impl PsLive {
         let wall = self.wall43();
         let due: Vec<(Pk, &'static str)> = self.pos.values().filter(|p| p.exit.is_none()).filter_map(|p| {
             // dip43 B6: the position's ms timer (off: cfg.exit_ms, dip42); A2: the wall backstop (dead-man live only)
-            time_exit_due_w(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.b43_exit_ms(p.pid), wall).map(|w| (p.mint, w))
+            // dip50 GRX: asked only when the regular timed exit is not due (it can only add an earlier exit; None with it off / not flagged)
+            time_exit_due_w(slot_now, p.land.0, self.cfg.exit_slots, p.opened.elapsed().as_millis() as u64, self.b43_exit_ms(p.pid), wall)
+                .or_else(|| self.grx50_due(p.pid, p.land.0, slot_now)).map(|w| (p.mint, w))
         }).collect();
         for (m, why) in due { self.exit(&m, why, slot_now, f64::NAN, arbx::feeds::clock::now_ns()); }
         if self.d43.blind.is_some() { self.deadman43(slot_now); }
@@ -4431,6 +4471,8 @@ impl PsLive {
         self.ctl47_check(false);
         // dip48: the followed fills whose fill+3 passed (nothing with the log off)
         if self.fl48.is_some() { self.fl48_close(slot_now, None); }
+        // dip50 GRX: the price paths whose fill + 5 passed (nothing with it off)
+        if self.grx.is_some() { self.grx50_tick(slot_now); }
         // dip49: the feed's slippage fails and the dev-age answers (nothing with the gate off)
         if self.rg49.is_some() { self.rg49_drain(); }
         self.pause47_tick();
@@ -4792,7 +4834,7 @@ impl PsLive {
         // dip26: the re-arm's part last ("" without it)
         let qs = self.quiet_status() + &self.v2_status() + &self.fee_status() + &self.rearm_status() + &self.ann_status() + &self.breaker_status() + &self.cr_status() + &self.wh_status() + &self.hl_status() + &self.bl_send_status() + &self.fp.as_ref().map(|f| f.status()).unwrap_or_default()
             + &self.fab.as_ref().map(|f| f.status()).unwrap_or_default() + &self.l38_status() + &self.s1_status() + &self.bd_status() + &self.wd_status()
-            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fu47.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fl48_status() + &self.rg49_status() + &self.status43() + &self.b43_status() + &self.status46();
+            + &self.f2_status() + &self.q1.as_ref().map(|q| q.status()).unwrap_or_default() + &self.fleet.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fu47.as_ref().map(|f| f.status()).unwrap_or_default() + &self.fl48_status() + &self.rg49_status() + &self.grx50_status() + &self.status43() + &self.b43_status() + &self.status46();
         let (u50, u99) = self.st.us.pct();
         let (b50, b99) = self.sh.build_us.lock().unwrap().pct();
         let mut lands: Vec<_> = self.st.landed.iter().collect(); lands.sort();
@@ -5169,7 +5211,7 @@ impl PsLive {
             qt: cfg_quiet.on().then(|| { let mut q = Quiet::new(&cfg_quiet, &std::collections::HashSet::new(), FxHashSet::default(), 0, false); q.warm_ns = 0; q }),
             v2: v2_log.then(pq::V2Ring::new), fee_q: VecDeque::new(), fee_24h: 0, fee_paused: false, fee_pauses: 0, last_t: 0, rm: rearm, l34, l35: L35::default(), fp, bl,
             fab: fab_on.then(psfeeab::FabSt::default), whs: pswh::WhSt::default(), h2: h2_on.then(psh2::H2::default), hls: pshl::HlSt::default(), l38, s1, bd, wd, f2, q1, fleet, d43: Default::default(),
-            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None, rg49: None };
+            b43: ps43_b::B43St::default(), p46: Default::default(), g47: Default::default(), f47: Default::default(), rf47: Default::default(), fu47: None, fl48: None, rg49: None, grx: None };
         // dip46: its modes (nothing with its flags off)
         p.p46_start();
         // dip47: the hot keys' start values, the control file's first read, the filter state fv 0
@@ -5178,6 +5220,7 @@ impl PsLive {
         if p.cfg.funder_log { p.fu47 = Some(psfunder47::Funder::idle()); }
         if p.cfg.flow_log { p.fl48 = Some(psflow48::Flow48::new(&p.cfg.tag_wallets)); }
         if p.cfg.rival_gate.is_some() { p.rg49 = Some(psrival49::Rg49::idle()); }
+        if p.cfg.grx { p.grx = Some(psgrx50::Grx::default()); }
         (p, atx, orx)
     }
 
@@ -5320,6 +5363,10 @@ mod dip48_tests;
 #[cfg(test)]
 #[path = "dip49_tests.rs"]
 mod dip49_tests;
+// dip50 (11-12): GRX, the rival-ahead early exit (psgrx50.rs); off by default = dip49c
+#[cfg(test)]
+#[path = "dip50_tests.rs"]
+mod dip50_tests;
 
 // dip45 (11-11 PKT): the FLEET SIGNAL shadow (ps45_fleet.rs; LOG ONLY, off by default = dip43g)
 #[cfg(test)]
