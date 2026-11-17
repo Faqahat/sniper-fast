@@ -81,3 +81,11 @@ fn dip51_flags() {
     let a: Vec<String> = ["snipe_engine", "--dip", "--live", "--presend-live-front", "3:40"].iter().map(|s| s.to_string()).collect();
     assert!(Cfg::from_argv(&a, &arbx::presend::Params::default(), true, 1_000_000_000).is_err());
 }
+
+/// both flags are known to the start-up flag check (r94's first start was refused: "unknown flag --presend-live-front")
+#[test]
+fn dip51_flags_known_to_check_flags() {
+    let known = src_flags("\"");
+    for f in D51FLAGS { assert!(known.contains(f), "{f} unknown to check_flags"); }
+    assert!(check_flags(&args(&["--presend-live-k", "20", "--presend-live-front", "4:40", "--presend-live-front-kinds", "t2"])).is_ok());
+}

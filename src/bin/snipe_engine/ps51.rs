@@ -13,7 +13,8 @@
 // Records: presend_live_arm / the re-arm's arm record carry "front": [slots, k] when the window paces dense; the start line says so.
 use anyhow::{bail, Result};
 
-pub const D51FLAGS: [&str; 2] = ["--presend-live-front", "--presend-live-front-kinds"];
+// the flag names live in pslive.rs (D51FLAGS): the start-up flag check reads the known flags from that file's source
+use super::D51FLAGS;
 
 /// the most tries per slot a dense front may ask for
 pub const FRONT_K_MAX: u64 = 50;

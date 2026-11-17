@@ -288,6 +288,8 @@ pub mod psrival49;
 // dip51 DENSE FRONT (more tries per slot in a window's first slots; off unless --presend-live-front SLOTS:K)
 #[path = "ps51.rs"]
 pub mod ps51;
+/// dip51 flags (here, not in ps51.rs: check_flags reads every "--flag" literal of this file's source; r94 start refused them)
+pub const D51FLAGS: [&str; 2] = ["--presend-live-front", "--presend-live-front-kinds"];
 const D49FLAGS: [&str; 6] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def",
     "--presend-live-devage-rpc", "--presend-live-devage-fallback"];
 
@@ -671,7 +673,7 @@ impl Cfg {
         ps43_b::needs_presend_live(argv)?;
         ps51::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D49FLAGS.iter()).chain(D47FLAGS.iter()).chain(ps51::D51FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D49FLAGS.iter()).chain(D47FLAGS.iter()).chain(D51FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
