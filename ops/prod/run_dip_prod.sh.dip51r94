@@ -574,7 +574,7 @@ case "$REGION" in
   fra) W=2g7rYv7yCQuNsxUfr5B61LBfkhYzHMhYTZkcZ6e2iTLE; KS=/root/prod/wallet-prod.enc; BASECFG=/root/sniper-dip/dip_probe.toml
        BUDGETF=/root/prod/dip_budget.json; PC=/root/prod/dip_prod.toml; TAGP=dip_r; ENVNAME=PROD;;
   ams) [ -s /root/prod/wallet-ams.address ] || die "missing /root/prod/wallet-ams.address (the Amsterdam wallet's public key)"
-       W=$(tr -d ' \n\r' < /root/prod/wallet-ams.address); KS=/root/prod/wallet-ams.enc; BASECFG=/root/sniper-dip/dip_edge_ams_r93.toml
+       W=$(tr -d ' \n\r' < /root/prod/wallet-ams.address); KS=/root/prod/wallet-ams.enc; BASECFG=/root/sniper-dip/dip_edge_ams_r94.toml
        BUDGETF=/root/prod/dip_budget_ams.json; PC=/root/prod/dip_ams.toml; TAGP=dip_ams_r; ENVNAME=PROD;;   # the engine accepts only DEV | PROD
   *) die "--region fra|ams";;
 esac
