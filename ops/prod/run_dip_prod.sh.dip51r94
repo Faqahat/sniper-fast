@@ -651,7 +651,7 @@ if [ -n "$PSLIVE" ]; then
       [ -n "$(path_field "$n" max_per_sec)" ] || die "--presend-live-routes: $n has no max_per_sec in its [[send]] block (a non-Helius attempt path needs its provider's TPS cap)"
     fi
   done
-  GMAX=50; [ "$NONHEL" -gt 0 ] && GMAX=100   # dip43: 60 -> 100 allowed (B1 cap test); the value is the run command's choice
+  GMAX=50; [ "$NONHEL" -gt 0 ] && GMAX=150   # dip51r94: 100 -> 150 (the dense front over 5 lanes; each lane keeps its own provider cap and Helius stays <= 50 by the check below)
   [ -z "${PSV[--presend-live-max-per-sec]:-}" ] || in_range "${PSV[--presend-live-max-per-sec]}" 1 $GMAX || die "--presend-live-max-per-sec must be 1..$GMAX (50 with Helius paths only: Helius allows 50/s per region over ALL its paths; up to 100 (dip43) when a non-Helius path shares the attempts)"
   if awk -v g="${PSV[--presend-live-max-per-sec]:-20}" 'BEGIN{exit !(g>50)}'; then
     awk -v h="$HELCAP" 'BEGIN{exit !(h<=50)}' || die "--presend-live-max-per-sec above 50 needs the Helius attempt paths capped at <= 50/s by themselves (now up to $HELCAP/s: lower --presend-live-path-max-per-sec or the Helius path's max_per_sec)"
