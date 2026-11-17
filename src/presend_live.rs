@@ -406,16 +406,32 @@ pub fn buy_out(vsol: u64, vtok: u64, spend: u64, fr: f64) -> u64 {
 }
 
 /// k attempts per slot, evenly spaced on the monotonic clock: due at `next`, then every `iv` ns; a tick later than one interval
-/// restarts the pace from now (no burst to catch up)
+/// restarts the pace from now (no burst to catch up). dip51: an optional dense FRONT paces at `iv_front` until `front_until`
+/// (the window's first slots), then at `iv` (off: iv_front = iv, front_until = 0, exactly dip49c)
 #[derive(Clone, Copy, Debug)]
-pub struct Pace { pub next: u64, pub iv: u64 }
+pub struct Pace { pub next: u64, pub iv: u64, pub iv_front: u64, pub front_until: u64 }
 impl Pace {
     /// `k` attempts per slot of `slot_ns`, the first one at `start`
-    pub fn new(start: u64, k: u64, slot_ns: u64) -> Pace { Pace { next: start, iv: (slot_ns / k.clamp(1, 1000)).max(1) } }
+    pub fn new(start: u64, k: u64, slot_ns: u64) -> Pace {
+        let iv = (slot_ns / k.clamp(1, 1000)).max(1);
+        Pace { next: start, iv, iv_front: iv, front_until: 0 }
+    }
+    /// dip51: as `new`, plus `front` = (slots, k_front): the first `slots` slots from `start` at `k_front` per slot
+    pub fn with_front(start: u64, k: u64, slot_ns: u64, front: Option<(u64, u64)>) -> Pace {
+        let mut p = Pace::new(start, k, slot_ns);
+        if let Some((slots, kf)) = front {
+            p.iv_front = (slot_ns / kf.clamp(1, 1000)).max(1);
+            p.front_until = start.saturating_add(slots.saturating_mul(slot_ns));
+        }
+        p
+    }
+    /// the interval in force at `t`
+    pub fn iv_at(&self, t: u64) -> u64 { if t < self.front_until { self.iv_front } else { self.iv } }
     /// due at `now`? (then the next one is scheduled)
     pub fn due(&mut self, now: u64) -> bool {
         if now < self.next { return false; }
-        self.next = if now - self.next >= self.iv { now + self.iv } else { self.next + self.iv };
+        let iv = self.iv_at(now);
+        self.next = if now - self.next >= iv { now + iv } else { self.next + iv };
         true
     }
 }

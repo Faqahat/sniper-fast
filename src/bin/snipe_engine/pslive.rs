@@ -284,6 +284,10 @@ pub mod psflow48;
 // dip49: the T2 RIVAL GATE (per try; log / live) and the re-arm fresh-holders f1 definition
 #[path = "psrival49.rs"]
 pub mod psrival49;
+
+// dip51 DENSE FRONT (more tries per slot in a window's first slots; off unless --presend-live-front SLOTS:K)
+#[path = "ps51.rs"]
+pub mod ps51;
 const D49FLAGS: [&str; 6] = ["--presend-live-rival-gate", "--presend-live-rival-gate-mode", "--presend-live-rival-gate-slots", "--presend-live-fresh-skip-ra-def",
     "--presend-live-devage-rpc", "--presend-live-devage-fallback"];
 
@@ -583,6 +587,8 @@ pub struct Cfg {
     pub c43: ps43::Cfg43,
     /// dip43 BUILDER B's items (ps43_b.rs; Default = all off = dip42)
     pub b43: ps43_b::B43Cfg,
+    /// dip51 dense front (off: D51Cfg::default() with front None)
+    pub d51: ps51::D51Cfg,
     /// dip43 C2 snipe-guard (None = off, the default: the Lighthouse deadline as dip42)
     pub g43: Option<ps43_guard::G43>,
     /// dip46 probe tries + filter A/B (psprobe46.rs; Default = off = dip43g)
@@ -663,8 +669,9 @@ impl Cfg {
         let arg_f64 = |f: &str, d: f64| arg(f).and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
         // dip43 B: its flags need --presend-live too
         ps43_b::needs_presend_live(argv)?;
+        ps51::needs_presend_live(argv)?;
         if !has("--presend-live") {
-            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D49FLAGS.iter()).chain(D47FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
+            if let Some(f) = FLAGS.iter().chain(QFLAGS.iter()).chain(RFLAGS.iter()).chain(FPFLAGS.iter()).chain(FABFLAGS.iter()).chain(WHFLAGS.iter()).chain(H2FLAGS.iter()).chain(HLFLAGS.iter()).chain(BLSFLAGS.iter()).chain(D38FLAGS.iter()).chain(S1FLAGS.iter()).chain(BDFLAGS.iter()).chain(DLFLAGS.iter()).chain(F2FLAGS.iter()).chain(Q1FLAGS.iter()).chain(A43FLAGS.iter()).chain(G43FLAGS.iter()).chain(D46FLAGS.iter()).chain(F45FLAGS.iter()).chain(D48FLAGS.iter()).chain(D49FLAGS.iter()).chain(D47FLAGS.iter()).chain(ps51::D51FLAGS.iter()).find(|f| has(f)) { bail!("{f} needs --presend-live"); }
             return Ok(None);
         }
         if !has("--presend-shadow") { bail!("--presend-live needs --presend-shadow (its records are the comparison)"); }
@@ -801,6 +808,7 @@ impl Cfg {
             c43: ps43::Cfg43::parse(argv)?,
             // dip43 B (every item off unless its flag)
             b43: ps43_b::B43Cfg::from_argv(argv)?,
+            d51: ps51::D51Cfg::from_argv(argv, arg_u64("--presend-live-k", 4))?,
             // dip43 C2 (set below)
             g43: None,
             // dip46 (every item off unless its flag)
@@ -1083,6 +1091,7 @@ impl Cfg {
             "max_fills": self.max_fills, "fee_budget": self.fee_budget, "create_slot": self.create_slot, "one_position": self.one_position, "min_age_slots": self.min_age_slots,
             "whale_pct": self.whale_pct, "window_slots": self.window_slots, "live_ms": self.live_ms, "exit_slots": self.exit_slots, "exit_ms": self.exit_ms, "tp": self.tp, "sl": self.sl,
             "fail_fee": self.fail_fee(), "margin_ms": MARGIN_MS, "whale_sell_ms": WHALE_SELL_MS});
+        if self.d51.front.is_some() { j["d51"] = self.d51.json(); }   // dip51: only when on (the no-flag records stay dip49c's)
         // dip20: only when a QUIET flag is on (flags off: dip19's record)
         if self.quiet.on() { j["quiet"] = self.quiet.json(); }
         // dip23: only with the v2 log flag
@@ -2736,6 +2745,8 @@ impl PsLive {
         // dip26: the re-arm's config at the END of the start-up line, only when on (the monitors read the line's earlier parts; a line of its
         // own starting "DIP PRESEND LIVE" would replace dipmon's parse of this one)
         let line = if cfg.rearm.on { format!("{line} | {}", rearm_desc(&cfg)) } else { line };
+        // dip51: the dense front, at the END, only when on
+        let line = format!("{line}{}", cfg.d51.desc());
         // dip27: also at the END, only when on
         let line = if cfg.lone_whale_slots > 0 { format!("{line} | LONE WHALE SKIP ON: a trigger whose whale is the only buyer in the last {} slots is skipped (after QUIET)", cfg.lone_whale_slots) } else { line };
         let line = if cfg.ann { format!("{line} | ANN ON (log-only): buyers/creator at arm, other holder at signing, ctx85 + holder clocks at fills") } else { line };
@@ -3578,7 +3589,7 @@ impl PsLive {
         let fpg = self.fp.as_ref().map(|_| Arc::new(pslog36::Gate::default()));
         // dip37: the window's fee arm, once, now (None with the A/B off)
         let fab = self.fab_assign(id);
-        let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::new(st_ns, self.cfg.k, slot_ns), n: 0, done: false,
+        let sw = SWin { id, mint: t.mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol: t.vsol, vtok: t.vtok, fr: t.fr(), pos: t.pos(), pace: pl::Pace::with_front(st_ns, self.cfg.k, slot_ns, self.cfg.d51.front_for(false)), n: 0, done: false,
             spend, rearm: false, ob6: ob6_pct(&self.det, self.cfg.ann || self.cfg.deep_drop > 0.0, &t.mint, &whale, &self.user),
             grd: grd_set(&self.det, self.cfg.ann, &t.mint, &self.user, t.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&t.mint), bd: self.bd_snap(&t.mint), g43: self.g43_set(&t.mint), p46: None, rfl: Default::default(), rg: self.rg49_snap(&t.mint, wide.is_none()) };
         // dip49b: a failed dev-age lookup: one more at the trigger; its error text for the window's summary (nothing with the gate off)
@@ -3600,6 +3611,8 @@ impl PsLive {
         if wide.is_none() { self.st.armed += 1; }
         let mut r = serde_json::json!({"ev": "presend_live_arm", "w": id, "trig": trig, "en_slot": en_slot, "k": self.cfg.k, "spend": spend, "drop": self.cfg.drop,
             "lim0": t.p() * (1.0 - self.cfg.drop), "dry": self.cfg.dry});
+        // dip51: the dense front this window paces at (absent when off)
+        if let Some((fs, fk)) = self.cfg.d51.front_for(false) { r["front"] = serde_json::json!([fs, fk]); }
         // dip48 fresh-holders skip (log mode / below the threshold): its verdict on the arm record; kept for the fill record
         if let Some(x) = fs48.as_ref() { let j = psctl47::fresh_json(x); r["fresh_skip"] = j.clone(); self.f47.fresh_w.insert(id, j); }
         // dip41: a wide window says so (its values kept for its fill / realized); a T2 arm carries the whale's dumper ledger values
@@ -5320,6 +5333,9 @@ mod dip48_tests;
 #[cfg(test)]
 #[path = "dip49_tests.rs"]
 mod dip49_tests;
+#[cfg(test)]
+#[path = "dip51_tests.rs"]
+mod dip51_tests;
 
 // dip45 (11-11 PKT): the FLEET SIGNAL shadow (ps45_fleet.rs; LOG ONLY, off by default = dip43g)
 #[cfg(test)]

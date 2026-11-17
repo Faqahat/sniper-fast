@@ -433,7 +433,7 @@ impl PsLive {
         let fpg = self.fp.as_ref().map(|_| Arc::new(pslog36::Gate::default()));
         // dip37: the window's fee arm, once, now (None with the fee A/B off)
         let fab = self.fab_assign(id);
-        self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::new(st_ns, k, slot_ns), n: 0, done: false,
+        self.sh.wins.lock().unwrap().push(SWin { id, mint, launch, st_ns, stop_ns: u64::MAX, en_slot, vsol, vtok, fr, pos, pace: pl::Pace::with_front(st_ns, k, slot_ns, self.cfg.d51.front_for(true)), n: 0, done: false,
             spend, rearm: true, ob6, grd: grd_set(&self.det, self.cfg.ann, &mint, &self.user, dump.tr.s), fpg: fpg.clone(), fab, blk: self.bl_send_hit(&mint), bd: self.bd_snap(&mint), g43: self.g43_set(&mint), p46: None, rfl: self.rf47_snap(&mint), rg: Default::default() });
         self.armed.insert(mint, id);
         self.f47_arm(id);
@@ -451,6 +451,8 @@ impl PsLive {
         let mut r = serde_json::json!({"ev": "presend_live_arm", "kind": "rearm", "w": id, "mint": b58(&mint), "dump": dump.json(), "holders": holders_json(&holders), "gap": gap,
             "check_slot": chk_slot, "arm_slot": arm_slot, "en_slot": en_slot, "arm_ms_after_dump": (chk_t as i64 - dump.tr.t_rx as i64) as f64 / 1e6 + deferred_ms,
             "deferred_ms": deferred_ms, "deferred": deferred.map(|d| d.1), "k": k, "spend": spend, "drop": drop, "lim0": lim0, "dry": dry});
+        // dip51: the dense front this window paces at (absent when off)
+        if let Some((fs, fk)) = self.cfg.d51.front_for(true) { r["front"] = serde_json::json!([fs, fk]); }
         if let Some(h) = &holders_arm { r["holders_arm"] = holders_json(h); }
         let r5_arm = r5.clone();
         if let Some(j) = r5 { r["r5"] = j; }
