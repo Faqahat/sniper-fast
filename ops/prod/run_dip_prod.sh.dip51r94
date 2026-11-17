@@ -1166,7 +1166,7 @@ B=/root/sniper-dip/snipe_engine_dip42
 # behaves like dip42 (golden test). Flags: /root/sniper-dip/dip43_flags.md
 B=/root/sniper-dip/snipe_engine_dip49c
 # dip51 (11-17; dip50 = the GRX build, never run) = dip49c + DENSE FRONT --presend-live-front SLOTS:K (+ --presend-live-front-kinds t2|rearm|t2,rearm); off = dip49c (golden tests)
-B=/root/sniper-dip/snipe_engine_dip51
+B=/root/sniper-dip/snipe_engine_dip51b   # dip51b (11-17): flag-check fix
 [ -x "$B" ] || die "missing engine $B"
 [ -f "$KS" ] || die "missing $KS (the prod keystore)"
 [ -x "$B" ] || die "missing $B"
